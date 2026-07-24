@@ -29,6 +29,13 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
             try {
                 if (topic === this.device.state!.subTopic) {
                     const payload = JSON.parse(message.toString('utf-8'))
+                    // DIAGNOSTIC: surface every cloud->device cmd so we can see which ones the bridge drops
+                    if (payload.cmd !== 'packet') {
+                        log(
+                            'bridge',
+                            `${this.device.deviceId} RX-cmd=${payload.cmd} (not relayed) ${JSON.stringify(payload.data)}`,
+                        )
+                    }
                     if (payload.cmd === 'completeProvisioning') {
                         //msgtopic=payload.data.appInfo.publication.message
                         this.mqtt.publish(
