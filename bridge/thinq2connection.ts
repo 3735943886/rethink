@@ -27,15 +27,18 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
 
         this.mqtt.on('message', (topic, message, packet) => {
             try {
+                // DIAGNOSTIC: log EVERY message on ANY topic (incl. the service channel we don't
+                // normally subscribe to) so we can see which topic/cmd the app's reservation uses.
+                {
+                    let cmd = '?'
+                    try {
+                        cmd = JSON.parse(message.toString('utf-8')).cmd
+                    } catch {}
+                    const relayed = topic === this.device.state!.subTopic
+                    log('bridge', `${this.device.deviceId} RX topic=${topic} cmd=${cmd} relayed=${relayed}`)
+                }
                 if (topic === this.device.state!.subTopic) {
                     const payload = JSON.parse(message.toString('utf-8'))
-                    // DIAGNOSTIC: surface every cloud->device cmd so we can see which ones the bridge drops
-                    if (payload.cmd !== 'packet') {
-                        log(
-                            'bridge',
-                            `${this.device.deviceId} RX-cmd=${payload.cmd} (not relayed) ${JSON.stringify(payload.data)}`,
-                        )
-                    }
                     if (payload.cmd === 'completeProvisioning') {
                         //msgtopic=payload.data.appInfo.publication.message
                         this.mqtt.publish(
@@ -66,6 +69,16 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
         this.mqtt.on('connect', async () => {
             log('bridge', `${this.device.deviceId} connected`)
             await this.mqtt.subscribe(this.device.state!.subTopic)
+            // DIAGNOSTIC: also subscribe to sibling topics under the same device prefix
+            // (e.g. the service/appliance channel) to discover where reservation cmds arrive.
+            const wildcard = this.device.state!.subTopic.replace(/\/[^/]*$/, '/#')
+            if (wildcard !== this.device.state!.subTopic) {
+                this.mqtt.subscribe(wildcard, (err) =>
+                    err
+                        ? log('bridge', `${this.device.deviceId} wildcard sub failed: ${err.message}`)
+                        : log('bridge', `${this.device.deviceId} wildcard sub ${wildcard}`),
+                )
+            }
             await this.mqtt.publish(
                 this.device.state!.provTopic,
                 JSON.stringify({
