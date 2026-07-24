@@ -113,6 +113,17 @@ export class DeviceAcceptor extends TypedEmitter<DeviceAcceptorEvents> {
             }
         }
 
+        // DIAGNOSTIC: the device might publish energy/service reports on a clip/ topic other than
+        // message/provisioning (e.g. a cached service channel). mqtt() never handles those and they
+        // are never relayed upstream, so flag them explicitly instead of losing them in the noise.
+        if (
+            client.deviceObj &&
+            topic !== 'clip/message/devices/' + payload.did &&
+            topic !== 'clip/provisioning/devices/' + payload.did
+        ) {
+            log('bridge', `${payload.did} UPLINK-OTHER-TOPIC ${topic} cmd=${payload.cmd} (not relayed)`)
+        }
+
         if (topic === 'clip/provisioning/devices/' + payload.did) {
             if (payload.cmd === 'preDeploy' || payload.cmd === 'deploy') {
                 client.deployMsg = payload as ClipDeployMessage
