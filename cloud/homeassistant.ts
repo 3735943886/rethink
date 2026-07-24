@@ -193,3 +193,15 @@ export type ClimateComponent = ComponentInfo & {
     swing_modes?: string[]
     swing_horizontal_modes?: string[]
 }
+
+export type HumidifierComponent = ComponentInfo & {
+    platform: 'humidifier'
+    device_class?: 'humidifier' | 'dehumidifier'
+    min_humidity?: number
+    max_humidity?: number
+    modes?: string[]
+    payload_on?: string
+    payload_off?: string
+    // per-attribute topics (command_topic/state_topic for power, target_humidity_*,
+    // current_humidity_topic, mode_*) are attached dynamically by TLVDevice.addField
+}
