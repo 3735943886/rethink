@@ -2,35 +2,11 @@ import * as mqtt from 'mqtt'
 import { Thinq2Device } from './thinqApi'
 import { TypedEmitter } from 'tiny-typed-emitter'
 import log from '@/util/logging'
-import crc16 from '@/util/crc16'
 
 type ConnectionEvents = {
     data: (buffer: Buffer) => void
     close: () => void
     error: (error: Error) => void
-}
-
-// The cloud frames reservation ("service") reads with byte5=0xFD, s=2 — a toDevice TLV header
-// variant this firmware silently drops (no ack), so the app's reservation query times out
-// ("연결 안 됨"). The very same read framed byte5=0x02, s=1, byte7=1 is acked immediately (verified
-// by injecting the identical 9-byte TLV payload with only the header changed). The payload/len/kind
-// are left untouched — only the header is normalized — and s=1 makes the device's ack propagate
-// back to the cloud, which is what the app is waiting on. Basic state/control polls already use
-// byte5=0x02, so this only ever rewrites frames the device would otherwise ignore.
-// toDevice TLV layout: [a][s] 04 00 00 00 65 [byte5] [byte6] [byte7] [len] [tlv..] [crc16]
-function normalizeServiceFrame(deviceId: string, buf: Buffer): Buffer {
-    if (buf.length >= 13 && buf[2] === 0x04 && buf[6] === 0x65 && buf[7] === 0xfd) {
-        const out = Buffer.from(buf)
-        out[1] = 0x01 // s: forward the device's ack back to the cloud
-        out[7] = 0x02 // byte5: 0xFD -> the format the firmware accepts
-        out[9] = 0x01 // byte7
-        const crc = crc16(out.subarray(2, out.length - 2))
-        out[out.length - 2] = (crc >> 8) & 0xff
-        out[out.length - 1] = crc & 0xff
-        log('bridge', `${deviceId} reframed service poll 0xFD->0x02 ${out.toString('hex')}`)
-        return out
-    }
-    return buf
 }
 
 export class Connection extends TypedEmitter<ConnectionEvents> {
@@ -84,7 +60,7 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
 
                     if (payload.cmd === 'packet') {
                         log('bridge', `${this.device.deviceId} <- ${payload.data}`)
-                        this.emit('data', normalizeServiceFrame(this.device.deviceId, Buffer.from(payload.data, 'hex')))
+                        this.emit('data', Buffer.from(payload.data, 'hex'))
                     }
                 }
             } catch (err) {
