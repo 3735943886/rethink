@@ -34,20 +34,10 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
 
         this.mqtt.on('message', (topic, message, packet) => {
             try {
-                // DIAGNOSTIC: the service channel (subscription.service.appliance) carries "service"
-                // commands like reservation. Log what arrives so we can build the relay from real data.
-                if (topic === this.device.state!.serviceSubTopic) {
-                    log('bridge', `${this.device.deviceId} SVC <- ${message.toString('utf-8')}`)
-                }
                 if (topic === this.device.state!.subTopic) {
                     const payload = JSON.parse(message.toString('utf-8'))
                     if (payload.cmd === 'completeProvisioning') {
                         //msgtopic=payload.data.appInfo.publication.message
-                        // DIAGNOSTIC: capture how the real cloud provisions the device's channels
-                        // (message/service/control publication+subscription). We mirror this in
-                        // cloud/thinq2/provisioning.ts generateDeployResponse to see whether giving
-                        // the device the service channel enables reservation ("service") handling.
-                        log('bridge', `${this.device.deviceId} completeProvisioning <- ${message.toString('utf-8')}`)
                         this.mqtt.publish(
                             this.device.state!.pubTopic,
                             JSON.stringify({
@@ -76,20 +66,6 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
         this.mqtt.on('connect', async () => {
             log('bridge', `${this.device.deviceId} connected`)
             await this.mqtt.subscribe(this.device.state!.subTopic)
-            // Subscribe to the exact (LG-authorized) service topic if we have it. This is a single
-            // named topic from the device's own CertResponse, NOT a wildcard, so it won't trip the
-            // broker ACL. A subscribe failure is logged but must not tear down the connection.
-            const serviceSubTopic = this.device.state!.serviceSubTopic
-            if (serviceSubTopic) {
-                this.mqtt.subscribe(serviceSubTopic, (err) =>
-                    log(
-                        'bridge',
-                        err
-                            ? `${this.device.deviceId} service sub failed: ${err.message}`
-                            : `${this.device.deviceId} subscribed service ${serviceSubTopic}`,
-                    ),
-                )
-            }
             await this.mqtt.publish(
                 this.device.state!.provTopic,
                 JSON.stringify({

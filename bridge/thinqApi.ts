@@ -275,18 +275,9 @@ type CertResponse = {
     publication: {
         message: string
         provisioning: string
-        control: string
-        service: {
-            appliance: string
-            appupdate: string
-        }
     }
     subscription: {
         message: string
-        service: {
-            appliance: string
-            appupdate: string
-        }
     }
 }
 
@@ -320,18 +311,6 @@ export type Thinq2DeviceState = {
     pubTopic: string
     provTopic: string
     subTopic: string
-    // Additional channels the real device is provisioned for. Optional because device states
-    // registered before these were captured won't have them (re-register to populate).
-    // subscription.service.appliance — where the cloud delivers "service" commands (e.g. reservation)
-    serviceSubTopic?: string
-    // subscription.service.appupdate
-    appupdateSubTopic?: string
-    // publication.control
-    controlPubTopic?: string
-    // publication.service.appliance — where the device publishes service responses
-    servicePubTopic?: string
-    // publication.service.appupdate
-    appupdatePubTopic?: string
     // The device's real deploy appInfo/platformInfo, captured at registration. Forwarded
     // upstream in preDeploy so the cloud sees the true protocolVer/softVer/etc. Optional
     // because states registered before this was captured won't have it (re-register to fill).
@@ -427,11 +406,6 @@ export class Thinq2Device implements Device {
             pubTopic: deviceConfig.publication.message,
             provTopic: deviceConfig.publication.provisioning,
             subTopic: deviceConfig.subscription.message,
-            serviceSubTopic: deviceConfig.subscription.service?.appliance,
-            appupdateSubTopic: deviceConfig.subscription.service?.appupdate,
-            controlPubTopic: deviceConfig.publication.control,
-            servicePubTopic: deviceConfig.publication.service?.appliance,
-            appupdatePubTopic: deviceConfig.publication.service?.appupdate,
         }
 
         return publicEncrypt(

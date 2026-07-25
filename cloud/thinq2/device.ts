@@ -105,31 +105,6 @@ export class DeviceAcceptor extends TypedEmitter<DeviceAcceptorEvents> {
             if (payload.cmd === 'req_timesync' && client.deviceObj && payload.did === client.deviceObj.id) {
                 this.timeSyncRequest(client)
             }
-
-            // DIAGNOSTIC: only device_packet is relayed upstream to the cloud. If the device reports
-            // anything via another cmd (e.g. an energy/service report), it is silently lost here.
-            // Surface it so we can tell whether cumulative energy is dropped on the way up.
-            if (
-                client.deviceObj &&
-                payload.did === client.deviceObj.id &&
-                !['completeProvisioning_ack', 'device_packet', 'req_timesync'].includes(payload.cmd)
-            ) {
-                log(
-                    'bridge',
-                    `${payload.did} UPLINK-DROP cmd=${payload.cmd} (not relayed) ${JSON.stringify(payload.data ?? null).slice(0, 200)}`,
-                )
-            }
-        }
-
-        // DIAGNOSTIC: the device might publish energy/service reports on a clip/ topic other than
-        // message/provisioning (e.g. a cached service channel). mqtt() never handles those and they
-        // are never relayed upstream, so flag them explicitly instead of losing them in the noise.
-        if (
-            client.deviceObj &&
-            topic !== 'clip/message/devices/' + payload.did &&
-            topic !== 'clip/provisioning/devices/' + payload.did
-        ) {
-            log('bridge', `${payload.did} UPLINK-OTHER-TOPIC ${topic} cmd=${payload.cmd} (not relayed)`)
         }
 
         if (topic === 'clip/provisioning/devices/' + payload.did) {
