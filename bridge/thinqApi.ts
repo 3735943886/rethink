@@ -275,9 +275,18 @@ type CertResponse = {
     publication: {
         message: string
         provisioning: string
+        control: string
+        service: {
+            appliance: string
+            appupdate: string
+        }
     }
     subscription: {
         message: string
+        service: {
+            appliance: string
+            appupdate: string
+        }
     }
 }
 

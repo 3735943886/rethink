@@ -37,5 +37,5 @@
     "storage_path": "./state"
   },
 
-  "log": ["status", "incoming", "HTTPS", "publish", "MGMT", "bridge"]
+  "log": ["status", "incoming", "HTTPS", "publish", "MGMT"]
 }
