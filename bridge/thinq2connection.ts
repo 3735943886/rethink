@@ -43,6 +43,11 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
                     const payload = JSON.parse(message.toString('utf-8'))
                     if (payload.cmd === 'completeProvisioning') {
                         //msgtopic=payload.data.appInfo.publication.message
+                        // DIAGNOSTIC: capture how the real cloud provisions the device's channels
+                        // (message/service/control publication+subscription). We mirror this in
+                        // cloud/thinq2/provisioning.ts generateDeployResponse to see whether giving
+                        // the device the service channel enables reservation ("service") handling.
+                        log('bridge', `${this.device.deviceId} completeProvisioning <- ${message.toString('utf-8')}`)
                         this.mqtt.publish(
                             this.device.state!.pubTopic,
                             JSON.stringify({
