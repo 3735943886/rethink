@@ -1,4 +1,4 @@
-import ACDevice from './ac_common'
+import ACDevice, { SWING_AXES_ON_OFF } from './ac_common'
 import { type DeviceDiscovery } from '../homeassistant'
 import { allowExtendedType } from '@/util/casting'
 
@@ -49,20 +49,19 @@ export default class Device extends ACDevice {
         return 0
     }
 
-    /* Which variant of the shared features this unit has */
-    hasSwingOnOff() {
-        return true
+    /*
+     * Which variant of the shared features this unit has. The vanes are driven as plain on/off on
+     * 0x205 / 0x206 rather than by position, which 0x2cd does not describe either way.
+     */
+    swingAxes() {
+        return SWING_AXES_ON_OFF
     }
-    hasAutoDrySelect() {
-        return true
-    }
+    readonly hasAutoDrySelect = true
     /*
      * The basic-filter priv-command returns an unpopulated counter here (used=0, life=720) that
      * does not match the app, so read the filter from the value tags instead.
      */
-    hasValueTagFilter() {
-        return true
-    }
+    readonly hasValueTagFilter = true
 
     /* Entities that so far only this model has been seen to report. */
     addModelFields(config: DeviceDiscovery) {
