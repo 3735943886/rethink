@@ -1,4 +1,4 @@
-import ACDevice, { SWING_AXES_ON_OFF } from './ac_common'
+import ACDevice, { SWING_AXES_ON_OFF, type WireLevels } from './ac_common'
 import { type DeviceDiscovery } from '../homeassistant'
 import { allowExtendedType } from '@/util/casting'
 
@@ -21,14 +21,22 @@ export default class Device extends ACDevice {
      * auto, whereas the wall units use auto=6 (and 4=heat). A cassette on a cooling-only outdoor
      * unit has no heat hardware at all, so restrict the mode list HA offers as well.
      */
-    readonly modeTable = ['cool', 'dry', 'fan_only', 'auto']
-    readonly modeToWire = { cool: 0, dry: 1, fan_only: 2, auto: 3 }
-    readonly haModes = ['off', 'cool', 'dry', 'fan_only', 'auto']
+    readonly modeLevels: WireLevels = [
+        ['cool', 0],
+        ['dry', 1],
+        ['fan_only', 2],
+        ['auto', 3],
+    ]
 
     /* Fan speed: a different 0x1fa scale, and six steps instead of the wall units' five. */
-    readonly fanTable = [undefined, 'very low', 'low', undefined, 'medium', undefined, 'high', 'power', 'auto']
-    readonly fanToWire = { 'very low': 1, low: 2, medium: 4, high: 6, power: 7, auto: 8 }
-    readonly haFanModes = ['auto', 'very low', 'low', 'medium', 'high', 'power']
+    readonly fanLevels: WireLevels = [
+        ['auto', 8],
+        ['very low', 1],
+        ['low', 2],
+        ['medium', 4],
+        ['high', 6],
+        ['power', 7],
+    ]
 
     /*
      * Setting the mode alone is ignored while the unit is powered off - verified on hardware, the
@@ -56,12 +64,16 @@ export default class Device extends ACDevice {
     swingAxes() {
         return SWING_AXES_ON_OFF
     }
-    readonly hasAutoDrySelect = true
+    autoDryStyle() {
+        return 'select' as const
+    }
     /*
      * The basic-filter priv-command returns an unpopulated counter here (used=0, life=720) that
      * does not match the app, so read the filter from the value tags instead.
      */
-    readonly hasValueTagFilter = true
+    filterStyle() {
+        return 'valueTags' as const
+    }
 
     /* Entities that so far only this model has been seen to report. */
     addModelFields(config: DeviceDiscovery) {
