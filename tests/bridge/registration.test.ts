@@ -16,7 +16,7 @@ type Recorded = { url: string; body: Record<string, unknown> }
 // A stand-in for the ThinQ2 REST API. Client.gatewayCache is a public static, so pre-seeding it
 // keeps the constructor from reaching out to route.lgthinq.com and points every call here.
 class FakeThinqApi {
-    server: Server
+    server!: Server
     requests: Recorded[] = []
     /** resultCode returned for POST /service/homes/:homeId/devices. '0000' means success. */
     addDeviceResult = '0000'
