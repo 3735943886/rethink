@@ -1,0 +1,62 @@
+// Where an appliance's firmware comes from.
+//
+// An appliance that reaches rethink by port redirection sends it every connection it makes on 443,
+// including ones rethink has no business answering. A firmware download is the case that matters:
+// the image lives on a public CDN and the appliance checks that certificate against its built-in
+// roots, not the CA it pinned from /route/certificate, so a certificate rethink signs is refused
+// and the connection is dropped mid-handshake - before there is any request to answer.
+//
+// Those connections have to reach the real server instead, and to route one, rethink has to know
+// the name belongs to firmware. It is never told directly, and hardcoding a CDN would only hold
+// for the one region it was read off. It does not need to be told: the cloud names the address in
+// the startFota it sends the appliance, and that passes through the bridge on the way down, so the
+// host that is about to be asked for is the host that gets registered here.
+//
+// See cloud/thinq2/sni-passthrough for what is done with it.
+
+import log from '@/util/logging'
+
+export class FirmwareHosts {
+    // Deliberately empty. Naming a CDN here would contradict the point - it would be right for one
+    // region and wrong elsewhere - and it would also mask this: with a host already present, an
+    // update succeeds whether or not startFota was read correctly, so there would be no way to
+    // tell. The cost is the few seconds between startFota and the download it announces: a restart
+    // of rethink inside that window loses the host and the update fails, which asking for it again
+    // puts right.
+    #hosts = new Set<string>()
+
+    /**
+     * Register the host of a firmware URL the cloud has just handed an appliance. Anything that is
+     * not a parseable http(s) URL is ignored.
+     */
+    note(downloadUrl: unknown) {
+        if (typeof downloadUrl !== 'string') return
+
+        let host: string
+        try {
+            const parsed = new URL(downloadUrl)
+            if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return
+            host = parsed.hostname
+        } catch {
+            return
+        }
+
+        // Logged even when the host is already known, because otherwise this path is silent from
+        // the second update onwards and there is no way to tell it ran at all.
+        log('status', `firmware download announced for ${host}${this.#hosts.has(host) ? '' : ' (new host)'}`)
+        this.#hosts.add(host)
+    }
+
+    /**
+     * Whether a TLS server name belongs to a firmware download, and so should be handed to the real
+     * server rather than answered here.
+     */
+    has(name: string) {
+        return this.#hosts.has(name)
+    }
+
+    /** Exposed for tests. */
+    all() {
+        return [...this.#hosts]
+    }
+}

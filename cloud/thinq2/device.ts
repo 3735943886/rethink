@@ -27,6 +27,14 @@ export class Device extends TypedEmitter<DeviceEvents> {
     deployAppInfo?: Record<string, unknown>
     deployPlatformInfo?: Record<string, unknown>
 
+    /*
+     * Called with a message from the appliance that this class has no handler for, so the bridge
+     * can put it in front of the real cloud and carry the answer back. A plain callback rather than
+     * an event, because the two device platforms share one union type and giving only this one an
+     * extra event makes every listener on that union uncallable.
+     */
+    onUnhandledClip?: (payload: ClipMessage) => void
+
     constructor(
         readonly broker: Broker,
         readonly topic: string,
@@ -105,9 +113,25 @@ export class DeviceAcceptor extends TypedEmitter<DeviceAcceptorEvents> {
             if (payload.cmd === 'req_timesync' && client.deviceObj && payload.did === client.deviceObj.id) {
                 this.timeSyncRequest(client)
             }
+
+            // The appliance's side of the same gap - anything it publishes that is not one of
+            // the three cmds above used to be dropped here, so its answer to a liveness check, or a
+            // firmware request from it, was never seen. Hand it to whoever is listening.
+            // This is what makes firmware updates possible: the exchange the cloud starts with
+            // reqUniversalCtrl is answered by respUniversalCtrl, and neither is handled above.
+            if (!['completeProvisioning_ack', 'device_packet', 'req_timesync'].includes(payload.cmd)) {
+                log('incoming', `unhandled cmd ${payload.cmd} on ${topic}`)
+                if (client.deviceObj && payload.did === client.deviceObj.id) client.deviceObj.onUnhandledClip?.(payload)
+            }
         }
 
         if (topic === 'clip/provisioning/devices/' + payload.did) {
+            // Same blind spot as above, on the other topic. Log only - the upstream
+            // side would have to publish an answer to the provisioning topic rather than the
+            // message one, so relaying is left until something actually turns up here.
+            if (payload.cmd !== 'preDeploy' && payload.cmd !== 'deploy')
+                log('incoming', `unhandled cmd ${payload.cmd} on ${topic}`)
+
             if (payload.cmd === 'preDeploy' || payload.cmd === 'deploy') {
                 client.deployMsg = payload as ClipDeployMessage
                 this.broker.publish(

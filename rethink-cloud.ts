@@ -8,6 +8,8 @@ import * as tls from 'node:tls'
 import * as net from 'node:net'
 import { routes as thinq1Routes } from './cloud/thinq1/http'
 import { routes as thinq2Routes } from './cloud/thinq2/provisioning'
+import { FirmwareHosts } from './cloud/thinq2/firmware'
+import { sniRouter } from './cloud/thinq2/sni-passthrough'
 import { DeviceAcceptor as T1Acceptor } from './cloud/thinq1/device'
 import { DeviceAcceptor as T2Acceptor } from './cloud/thinq2/device'
 import { Connection as HA_connection } from './cloud/homeassistant'
@@ -99,7 +101,7 @@ function t1setup(manager: DeviceManager) {
 }
 
 // Thinq2
-function t2setup(manager: DeviceManager) {
+function t2setup(manager: DeviceManager, firmwareHosts: FirmwareHosts) {
     // Thinq2 HTTPS server
     const app = express()
     app.use(express.json())
@@ -115,11 +117,28 @@ function t2setup(manager: DeviceManager) {
 
     // fallback
     app.use((req, res) => {
+        // Nothing above answers this path, and the appliance is told so with an empty body - which
+        // is indistinguishable, from its side, from the request having worked. Say what was asked
+        // for, so a call rethink does not implement shows up instead of disappearing. The body is
+        // deliberately not logged: this is whatever an unrecognised caller sent, and it ends up in
+        // a file that gets copied around.
+        log('HTTPS', 'unhandled', req.method, req.url, 'ua=' + (req.headers['user-agent'] ?? '-'))
         res.header('content-type', 'text/xml;charset=utf-8')
         res.end('')
     })
 
-    https.createServer(tlsOptions, app).listen(config.https_port.bind)
+    // Not every connection arriving on 443 is one rethink should answer. A firmware download is
+    // checked against the appliance's built-in roots, not the CA it pinned from us, so
+    // impersonating the CDN cannot work - the appliance drops the handshake before it ever sends a
+    // request. Decide from the ClientHello: names rethink serves are terminated here as before,
+    // firmware hosts are spliced to the real server so the appliance validates against it directly.
+    const httpsServer = https.createServer(tlsOptions, app)
+    net.createServer(
+        sniRouter(
+            (name) => firmwareHosts.has(name),
+            (socket) => httpsServer.emit('connection', socket),
+        ),
+    ).listen(config.https_port.bind)
 
     // internal MQTT broker
     const broker = new Broker()
@@ -138,14 +157,18 @@ const ha = new HA_bridge(new HA_connection(config.homeassistant))
 const manager = new DeviceManager()
 manager.on('newDevice', (dev) => ha.newDevice(dev))
 
+// Learned from the startFota messages the bridge carries, and consulted when deciding whether a
+// connection on 443 is one rethink should answer at all.
+const firmwareHosts = new FirmwareHosts()
+
 t1setup(manager)
-t2setup(manager)
+t2setup(manager, firmwareHosts)
 
 let bridge: Bridge | undefined
 if (config.bridge) {
     mkdirSync(config.bridge.storage_path, { recursive: true })
     const storage = new JSONStorage(config.bridge.storage_path)
-    bridge = new Bridge(storage, manager)
+    bridge = new Bridge(storage, manager, firmwareHosts)
 }
 
 if (config.management_port) Management.app(ha, manager, bridge).listen(config.management_port.bind)
