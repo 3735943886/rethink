@@ -9,6 +9,37 @@ type ConnectionEvents = {
     error: (error: Error) => void
 }
 
+export type ClipPayload = { cmd: string; type?: number; data?: unknown; [key: string]: unknown }
+
+/*
+ * Cmds that must never cross the bridge, in either direction.
+ *
+ * This was an allow list holding only `check_mfota`, and that turned out to be too narrow to learn
+ * anything from. Pressing "update" in the ThinQ app makes the cloud ask the appliance whether it is
+ * there at all - `reqUniversalCtrl` with `reqType: online_check` - before it offers any firmware.
+ * That was dropped here, so from the cloud's side the appliance is simply offline and the exchange
+ * ends before it starts.
+ *
+ * Relaying the question is only half of it; the appliance's answer has to reach the cloud as well.
+ * Asking a real appliance directly (tools/clip-probe.ts) shows what that answer is: it replies
+ * `respUniversalCtrl` within about 100ms, echoing reqType/messageId/clientId - which is what the
+ * cloud correlates on - and adding `responseCode: "0000"`. So both cmds have to cross, in opposite
+ * directions, and an allow list has to be right about a name before it has been observed.
+ *
+ * So: carry anything, except the handful that would do damage. Those are the provisioning verbs.
+ * `undeploy` in particular could tear down the registration this whole branch exists to preserve,
+ * and the deploy pair is already handled on both sides - replaying it would fight that handling.
+ * Everything else an appliance emits is a report or an answer.
+ *
+ * `check_mfota` is the other half of the firmware path: the appliance raises it on a schedule it
+ * carries in the message (`check_mfota_period`, 12h on the units that have it enabled).
+ */
+const NEVER_RELAYED_CMDS = ['undeploy', 'deploy', 'preDeploy', 'completeProvisioning', 'completeProvisioning_ack']
+
+export function isRelayable(cmd: string) {
+    return !NEVER_RELAYED_CMDS.includes(cmd)
+}
+
 /**
  * What a bridged appliance tells the cloud about itself when it introduces itself.
  *
@@ -107,6 +138,14 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
                         log('bridge', `${this.device.deviceId} <- ${payload.data}`)
                         this.emit('data', Buffer.from(payload.data, 'hex'))
                     }
+
+                    // Only the two cmds above are acted on here; everything else is carried to the
+                    // appliance as it stands, or logged as refused.
+                    if (payload.cmd !== 'completeProvisioning' && payload.cmd !== 'packet') {
+                        const relayed = isRelayable(payload.cmd)
+                        log('bridge', `${this.device.deviceId} <- ${relayed ? 'relay' : 'refused'} ${payload.cmd}`)
+                        if (relayed) this.onCloudClip?.(payload as ClipPayload)
+                    }
                 }
             } catch (err) {
                 console.log(err)
@@ -134,6 +173,31 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
 
         this.mqtt.on('close', () => this.emit('close'))
         this.mqtt.on('error', (err) => this.emit('error', err))
+    }
+
+    /* Called with the cloud's answer to a relayed cmd. See Device.onUnhandledClip. */
+    onCloudClip?: (payload: ClipPayload) => void
+
+    /*
+     * Put a message from the appliance in front of the real cloud as it stands.
+     * The appliance's own fields are kept - an answer to `reqUniversalCtrl` carries the cloud's
+     * `messageId` back in `data`, which is what the cloud correlates on - and only the envelope
+     * this connection owns is rewritten.
+     */
+    sendClip(payload: ClipPayload) {
+        if (!isRelayable(payload.cmd)) return
+
+        log('bridge', `${this.device.deviceId} -> relay ${payload.cmd}`)
+        this.mqtt.publish(
+            this.device.state!.pubTopic,
+            JSON.stringify({
+                ...payload,
+                mid: ++this.mid,
+                did: this.device.deviceId,
+                kind: this.device.meta.modelName,
+            }),
+            { qos: 1 },
+        )
     }
 
     send(data: string | Buffer) {

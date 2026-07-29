@@ -13,6 +13,7 @@ import { Connection as Thinq1Connection } from './thinq1connection'
 import { Connection as Thinq2Connection } from './thinq2connection'
 import { Device as T1Downstream } from '@/cloud/thinq1/device'
 import { Device as T2Downstream } from '@/cloud/thinq2/device'
+import { FirmwareHosts } from '@/cloud/thinq2/firmware'
 import { TypedEmitter } from 'tiny-typed-emitter'
 
 type StatusCallback = (status: string) => void
@@ -41,11 +42,11 @@ class BridgedDevice {
     constructor(
         readonly upstream: ClientDevice,
         readonly downstream: AnyDevice,
+        readonly firmwareHosts?: FirmwareHosts,
     ) {
         // we create the functions at runtime so that they have unique identities that can be removed with removeListener
         this.onDownstreamData = (packet: Buffer) => this.connection?.send(packet)
         this.onDownstreamClose = () => this.destroy()
-
         if (this.upstream.platformType !== this.downstream.platform) {
             console.warn("Bridge device types don't match")
             return
@@ -53,6 +54,12 @@ class BridgedDevice {
 
         downstream.on('data', this.onDownstreamData)
         downstream.on('close', this.onDownstreamClose)
+
+        // Messages the cloud-side Device has no handler for, carried upstream.
+        if (downstream instanceof T2Downstream)
+            downstream.onUnhandledClip = (payload) => {
+                if (this.connection instanceof Thinq2Connection) this.connection.sendClip(payload)
+            }
 
         this.reconnectNow()
     }
@@ -74,7 +81,19 @@ class BridgedDevice {
         } else if (U instanceof Thinq2Device && D instanceof T2Downstream) {
             // Forward the physical device's real deploy appInfo/platformInfo so the upstream
             // preDeploy reports its true protocolVer/softVer/etc. instead of placeholders.
-            this.connection = new Thinq2Connection(U, D.deployAppInfo, D.deployPlatformInfo)
+            const conn = new Thinq2Connection(U, D.deployAppInfo, D.deployPlatformInfo)
+            // The cloud's answer to a relayed cmd, handed back to the appliance. startFota is also
+            // where the cloud names the firmware address, and the appliance's request for it comes
+            // back to rethink, so note where it was told to go before passing the message on.
+            conn.onCloudClip = (payload) => {
+                if (payload.cmd === 'startFota')
+                    this.firmwareHosts?.note(
+                        (payload.data as { updatingFwInfo?: { downloadUrl?: unknown } } | undefined)?.updatingFwInfo
+                            ?.downloadUrl,
+                    )
+                D.send(payload.cmd, payload.type ?? 0, (payload.data ?? {}) as object)
+            }
+            this.connection = conn
             this.connection.on('data', (payload) => D.send_packet(payload))
         } else {
             console.warn("Can't connect bridge")
@@ -103,6 +122,7 @@ class BridgedDevice {
         }
         this.downstream.removeListener('data', this.onDownstreamData)
         this.downstream.removeListener('close', this.onDownstreamClose)
+        if (this.downstream instanceof T2Downstream) this.downstream.onUnhandledClip = undefined
         clearTimeout(this.reconnectTimeout)
         this.reconnectTimeout = undefined
     }
@@ -121,6 +141,7 @@ export class Bridge extends TypedEmitter<BridgeEvents> {
     constructor(
         readonly state: BridgeState,
         readonly manager: DeviceManager,
+        readonly firmwareHosts?: FirmwareHosts,
     ) {
         super()
         this.manager.on('newDevice', this.#start.bind(this))
@@ -132,7 +153,7 @@ export class Bridge extends TypedEmitter<BridgeEvents> {
         const clientDevice = this.loadSavedDevice(dev)
         if (!clientDevice) return
 
-        const bridged = new BridgedDevice(clientDevice, dev)
+        const bridged = new BridgedDevice(clientDevice, dev, this.firmwareHosts)
         this.bridgedDevices.set(dev.id, bridged)
         this.emit('started', dev.id)
     }
@@ -166,7 +187,7 @@ export class Bridge extends TypedEmitter<BridgeEvents> {
         const clientDevice = await this.register(dev, devType, statusCallback)
         if (!clientDevice) return false
 
-        const bridged = new BridgedDevice(clientDevice, dev)
+        const bridged = new BridgedDevice(clientDevice, dev, this.firmwareHosts)
         this.bridgedDevices.set(dev.id, bridged)
         this.emit('started', dev.id)
         return true
