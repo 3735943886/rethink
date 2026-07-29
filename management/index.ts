@@ -232,6 +232,32 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                             injectFlag = false
                         }
                     }
+
+                    /*
+                     * The two injections above are packets - the payload an
+                     * appliance carries inside cmd `device_packet`. The clip cmds that wrap them
+                     * (`check_mfota`, `reqUniversalCtrl`, ...) had no injection path at all, so the
+                     * only way to exercise one was to make the appliance or the cloud emit it and
+                     * wait: 12h for a firmware check, or a press of "update" in the ThinQ app.
+                     *
+                     * sendClipToDevice   {cmd, type, data} - as if the cloud had sent it
+                     * sendClipFromDevice {cmd, type, data} - as if the appliance had sent it; goes
+                     *                    to the bridge, and so to the real cloud, exactly as an
+                     *                    unhandled cmd off the wire does. Still subject to the
+                     *                    bridge's own refusal to relay the provisioning verbs.
+                     */
+                    if (typeof json.sendClipToDevice === 'object' && dev && dev instanceof T2Device) {
+                        const clip = json.sendClipToDevice
+                        log('MGMT', id, `injecting clip to device: ${JSON.stringify(clip)}`)
+                        dev.send(clip.cmd, clip.type ?? 0, clip.data ?? {})
+                    }
+
+                    if (typeof json.sendClipFromDevice === 'object' && dev && dev instanceof T2Device) {
+                        const clip = json.sendClipFromDevice
+                        log('MGMT', id, `injecting clip from device: ${JSON.stringify(clip)}`)
+                        if (!dev.onUnhandledClip) ws.send(JSON.stringify({ error: 'device is not bridged' }))
+                        dev.onUnhandledClip?.({ ...clip, did: id })
+                    }
                 } catch (err) {
                     log('MGMT', id, `inject error: ${err}`)
                 }
