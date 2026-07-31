@@ -93,8 +93,9 @@ describe(MODEL_ID, () => {
         assert.equal(c.pm1.device_class, 'pm1')
         assert.equal(c.pm25.device_class, 'pm25')
         assert.equal(c.pm10.device_class, 'pm10')
-        assert.equal(c.humidity.device_class, 'humidity')
-        assert.equal(c.temperature.device_class, 'temperature')
+        // the unit's temperature and humidity tags do not describe the room - see the header
+        assert.equal(c.humidity, undefined)
+        assert.equal(c.temperature, undefined)
         assert.equal(c.filter_life.unit_of_measurement, '%')
         assert.equal(c.top_filter_life.unit_of_measurement, '%')
     })
@@ -110,8 +111,9 @@ describe(MODEL_ID, () => {
         assert.equal(p['pm1-'], 8)
         assert.equal(p['pm25-'], 8)
         assert.equal(p['pm10-'], 8)
-        assert.equal(p['humidity-'], 30)
-        assert.equal(p['temperature-'], 40) // raw 80, reported as raw/2
+        // the frame carries humidity 30 and temperature raw 80, and neither is published
+        assert.equal(p['humidity-'], undefined)
+        assert.equal(p['temperature-'], undefined)
         assert.equal(p['air_quality-'], 1)
         assert.equal(p['odor-'], 1)
         assert.equal(p['light-'], 'OFF')

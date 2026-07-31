@@ -22,7 +22,7 @@ import HADevice from './base'
  *   0x1f9  airState.opMode                           operating-mode select  (write-verified)
  *   0x1fa  airState.windStrength                     fan preset mode        (write-verified)
  *   0x1fc  airState.tempState.unit                   -
- *   0x1fd  airState.tempState.current (raw/2 °C)     temperature (see below)
+ *   0x1fd  airState.tempState.current (raw/2 °C)     - (see below)
  *   0x1fe  airState.tempState.target  (raw/2 °C)     -
  *   0x21a  airState.reservation.sleepTime            sleep timer (min)      (write-verified)
  *   0x21b  airState.reservation.targetTimeToStop     -
@@ -39,7 +39,7 @@ import HADevice from './base'
  *   0x333  airState.quality.PM1                      PM1 sensor
  *   0x334  airState.quality.PM2                      PM2.5 sensor
  *   0x335  airState.quality.PM10                     PM10 sensor
- *   0x336  airState.humidity.current                 humidity sensor
+ *   0x336  airState.humidity.current                 - (see below)
  *   0x33a  airState.filterMngStates.desorption       -
  *   0x355  airState.filterMngStates.useTime          filter life (with 0x356)
  *   0x356  airState.filterMngStates.maxTime          filter life (with 0x355)
@@ -77,10 +77,12 @@ import HADevice from './base'
  * caps it at 420 minutes but the appliance accepted 480, and the model's own comment talks about 12
  * hour settings, so the entity allows the full 720 the sibling off-timer tag declares.
  *
- * Temperature is exposed as a diagnostic only. The scale is confirmed (the cloud reports raw/2, so
- * wire 63 came back as 31.5 °C), but this unit reads a steady 40 °C, and the model description
- * marks temperature display unsupported for it - so it looks like an internal sensor rather than
- * room air. Being diagnostic keeps it out of the way while still showing what the appliance says.
+ * Temperature (0x1fd) and humidity (0x336) are not exposed. Both tags are named and their scales are
+ * known - the cloud reports temperature as raw/2, so wire 63 came back as 31.5 °C - but neither
+ * matches the room: the temperature sits at a steady 40 °C, the model description marks temperature
+ * display unsupported for this unit, and the humidity reads no better. They look like internal
+ * sensors of the appliance rather than measurements of the air around it, so publishing them only
+ * puts wrong numbers on a dashboard.
  */
 
 // Operating modes. The capability response's 0x2c1 reads 0x1E000 - bits 13..16 - which selects
@@ -177,34 +179,6 @@ export default class Device extends TLVDevice {
         // The unit's own 1..4 air-quality and odour indices, as the app shows them.
         this.addReadout(config, 'air_quality', 0x240, 'Air quality', 'mdi:weather-hazy')
         this.addReadout(config, 'odor', 0x241, 'Odour', 'mdi:scent')
-
-        config.components['humidity'] = allowExtendedType({
-            platform: 'sensor',
-            unique_id: '$deviceid-humidity',
-            name: 'Humidity',
-            device_class: 'humidity',
-            unit_of_measurement: '%',
-            state_class: 'measurement',
-        })
-        this.addField(config, { id: 0x336, name: '', comp: 'humidity', writable: false })
-
-        config.components['temperature'] = allowExtendedType({
-            platform: 'sensor',
-            unique_id: '$deviceid-temperature',
-            name: 'Temperature',
-            device_class: 'temperature',
-            unit_of_measurement: '°C',
-            state_class: 'measurement',
-            suggested_display_precision: 0,
-            entity_category: 'diagnostic', // reads like an internal sensor - see the header
-        })
-        this.addField(config, {
-            id: 0x1fd,
-            name: '',
-            comp: 'temperature',
-            writable: false,
-            read_xform: (raw) => raw / 2,
-        })
 
         // Filter life. The appliance reports the hours left and the hour budget as separate tags;
         // what is worth an entity is the percentage, so both tags feed one computed value.
