@@ -1,3 +1,8 @@
+// The appliance carries its self-clean schedule in UTC, so what gets published depends on where the
+// machine running rethink is. Pin the zone to the one the capture was made in, where the app showed
+// the same schedule as the 5th at 01:00.
+process.env.TZ = 'Asia/Seoul'
+
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import DUT from '@/cloud/devices/1WPU4CIGCR__2'
@@ -84,7 +89,8 @@ describe(MODEL_ID, () => {
         assert.equal(p.auto_care, 'ON')
         assert.equal(p.button_sound, 'ON')
         assert.equal(p.not_use_notice, 'ON')
-        assert.equal(p.sterilize_schedule, '08-04 16:00')
+        // the wire carries 08-04 16:00 UTC; the app showed the same schedule as the 5th at 01:00
+        assert.equal(p.sterilize_schedule, '08-05 01:00')
     })
 
     test('the UV lamp is reported while it runs', () => {
@@ -111,7 +117,7 @@ describe(MODEL_ID, () => {
         assert.equal(props(ha).default_water_amount, '120 ml')
     })
 
-    test('the dispensed totals are six counters, one per tap', () => {
+    test("today's dispensed water is six counters, one per tap", () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', SAMPLE_COUNTERS)
 
