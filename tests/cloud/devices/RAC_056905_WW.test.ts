@@ -94,8 +94,8 @@ describe(MODEL_ID, () => {
         assert.ok(components.energysave, 'energysave (because 0x2CC bit 0x2)')
         assert.ok(components.autodry, 'autodry (because 0x2CC bit 0x4)')
         assert.ok(components.sleeptimer, 'sleeptimer (because 0x2D3 bit 0x1)')
-        assert.ok(components.starttimer, 'starttimer (because 0x2D3 bit 0x4)')
-        assert.ok(components.stoptimer, 'stoptimer (because 0x2D3 bit 0x4)')
+        // 0x2D3 bit 0x4 advertises a turn-on/turn-off pair, which is deliberately not exposed
+        assert.ok(!components.starttimer && !components.stoptimer, 'no turn-on/off timers')
         // Conversely, airclean (0x2CC bit 0x1) is not unlocked.
         assert.ok(!components.airclean, 'airclean off (0x2CC bit 0x1 unset)')
 
@@ -132,8 +132,6 @@ describe(MODEL_ID, () => {
         assert.equal(ha.getProperty(DEVICE_ID, 'climate', 'swing_horizontal_mode_state'), 'off') // 0x322=0
         assert.equal(ha.getProperty(DEVICE_ID, 'autodry', 'state'), 'OFF') // 0x20E=0
         assert.equal(ha.getProperty(DEVICE_ID, 'sleeptimer', 'state'), 0) // 0x21A=0
-        assert.equal(ha.getProperty(DEVICE_ID, 'starttimer', 'state'), 0) // 0x21C=0
-        assert.equal(ha.getProperty(DEVICE_ID, 'stoptimer', 'state'), 0) // 0x21B=0
         assert.equal(ha.getProperty(DEVICE_ID, 'jet', 'state'), 'OFF')
 
         // energysave is mode-dependent (cool only). With mode=heat its read_callback returns false,
