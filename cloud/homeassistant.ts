@@ -165,6 +165,10 @@ export type OriginInfo = {
 
 export type AvailabilityInfo = {
     topic: string
+    // Home Assistant documents defaults for these two, but a payload that leaves them out reaches
+    // the entity with the key missing and setup fails on a KeyError, so we always state them.
+    payload_available?: string
+    payload_not_available?: string
 }
 
 export type ComponentInfo = {

@@ -142,8 +142,8 @@ const STATE_LOCKED = 3
 // only time the appliance would act on it anyway.
 const REMOTE_START_REQUIRED = {
     availability: [
-        { topic: '$this/availability' },
-        { topic: '$rethink/availability' },
+        { topic: '$this/availability', payload_available: 'online', payload_not_available: 'offline' },
+        { topic: '$rethink/availability', payload_available: 'online', payload_not_available: 'offline' },
         { topic: '$this/remote_start', payload_available: 'ON', payload_not_available: 'OFF' },
     ],
     availability_mode: 'all',
