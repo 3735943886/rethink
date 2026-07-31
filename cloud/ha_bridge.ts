@@ -21,6 +21,7 @@ import F3L2CYU__ from './devices/F3L2CYU__'
 import RV13B6BSD_D_US_WIFI from './devices/RV13B6BSD_D_US_WIFI'
 import WBEY3GT from './devices/WBEY3GT'
 import AIR_910604_WW from './devices/AIR_910604_WW'
+import PAC_910604_WW from './devices/PAC_910604_WW'
 import { Device as T1Device } from './thinq1/device'
 import { Device as T2Device } from './thinq2/device'
 import { type Connection } from './homeassistant'
@@ -61,6 +62,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     ['RV13B6BSD_D_US_WIFI']: RV13B6BSD_D_US_WIFI, // LG electric dryer
     WBEY3GT, // LG electric range/cooktop (deviceType 303), status only
     AIR_910604_WW, // LG air purifier (deviceType 402); same TLV family, fan platform
+    PAC_910604_WW, // LG stand air conditioner (deviceType 401); ac_common subclass
 }
 
 class Bridge {
