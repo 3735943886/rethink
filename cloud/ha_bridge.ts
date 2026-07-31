@@ -23,6 +23,7 @@ import WBEY3GT from './devices/WBEY3GT'
 import AIR_910604_WW from './devices/AIR_910604_WW'
 import PAC_910604_WW from './devices/PAC_910604_WW'
 import D140110 from './devices/D140110'
+import WPU4CIGCR from './devices/1WPU4CIGCR__2'
 import { Device as T1Device } from './thinq1/device'
 import { Device as T2Device } from './thinq2/device'
 import { type Connection } from './homeassistant'
@@ -65,6 +66,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     AIR_910604_WW, // LG air purifier (deviceType 402); same TLV family, fan platform
     PAC_910604_WW, // LG stand air conditioner (deviceType 401); ac_common subclass
     D140110, // LG dishwasher (deviceType 204), status only
+    ['1WPU4CIGCR__2']: WPU4CIGCR, // LG water purifier (deviceType 103), status only
 }
 
 class Bridge {
