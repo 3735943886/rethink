@@ -154,3 +154,21 @@ test('encode AABB round-trips body and checksum', () => {
     const { hex } = encodePacket({ protocol: 'aabb', body: d0.body })
     assert.equal(hex, AABB)
 })
+
+/*
+ * The ceiling cassettes, the portable and stand air conditioners and the air purifiers mark their
+ * fromDevice frames 0xa7 rather than 0x87 - the difference tlv_device's isHeaderByte6() hook
+ * exists for. Until this decoded them too, a capture holding a model's answer to a capability
+ * query read back as no answer at all.
+ */
+test('decode: a fromDevice TLV packet marked 0xa7 rather than 0x87', () => {
+    // real air-purifier frame: 0x335 (PM10) = 9
+    const d = decodePacket('000004000000a702042502cd49d3c4')
+    assert.equal(d.protocol, 'tlv')
+    if (d.protocol !== 'tlv') return
+
+    assert.equal(d.direction, 'fromDevice')
+    assert.equal(d.crcOk, true)
+    assert.deepEqual(d.tlv, [{ t: 0x335, l: 0, v: 9 }])
+    assert.equal(d.frame.kind, 0xa7, 'the marker is reported as found, not normalized away')
+})

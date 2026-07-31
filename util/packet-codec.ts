@@ -158,9 +158,14 @@ export function decodePacket(hex: string): Decoded {
         }
     }
 
-    // TLV: identify by the uart "kind" byte at index 6
-    if (buf.length >= 13 && buf[2] === 0x04 && (buf[6] === 0x87 || buf[6] === 0x65)) {
-        const fromDevice = buf[6] === 0x87
+    // TLV: identify by the uart "kind" byte at index 6.
+    //
+    // 0xa7 is the same fromDevice frame as 0x87 - the ceiling cassettes, the portable and stand
+    // air conditioners and the air purifiers all mark theirs that way, which tlv_device's
+    // isHeaderByte6() hook exists for. Without it here every frame from those models decodes as
+    // protocol 'unknown', so a capture holding the answer to a query reads as no answer at all.
+    if (buf.length >= 13 && buf[2] === 0x04 && (buf[6] === 0x87 || buf[6] === 0xa7 || buf[6] === 0x65)) {
+        const fromDevice = buf[6] !== 0x65
         const len = buf[10]
         if (11 + len + 2 > buf.length) {
             return { protocol: 'unknown', hex, reason: 'TLV length field overruns buffer' }
