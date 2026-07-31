@@ -39,6 +39,17 @@ export default class Device extends ACDevice {
     ]
 
     /*
+     * Not narrowed by the 0x2c2 bitmap. This unit reports 469 - wire values 0, 2, 4, 6, 7 and 8 -
+     * which agrees with the list above on five of six but offers 0 where this says 1. The list is
+     * what was derived by driving the appliance, so it wins over an unexplained disagreement about
+     * the slowest step; letting the bitmap narrow it would silently drop "very low". Worth settling
+     * by writing 0 and seeing whether the panel shows the same step as 1 does.
+     */
+    fanCaps() {
+        return undefined
+    }
+
+    /*
      * Setting the mode alone is ignored while the unit is powered off - verified on hardware, the
      * official app turns the unit on by sending 0x1f7=1 together with the mode.
      */
