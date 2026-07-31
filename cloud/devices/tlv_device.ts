@@ -308,12 +308,25 @@ export default class TLVDevice extends HADevice {
             return
         }
 
-        let value: string | number | null | undefined
-        if (def.write_xform) value = def.write_xform(mqttValue)
+        /*
+         * A field with no write_xform writes what HA sent, converted below. This used to leave
+         * `value` undefined instead, which meant such a field dropped every write silently - the
+         * entity existed, took a value in HA and sent nothing to the appliance. A write_xform is
+         * needed to map a name to a wire value or to scale one, not to say "pass this through",
+         * so its absence should not be what decides whether a write happens at all.
+         */
+        let value: string | number | null | undefined = def.write_xform ? def.write_xform(mqttValue) : mqttValue
 
         if (value === null || value === undefined) return
 
         if (typeof value === 'string') value = Number(value)
+
+        // Now that a missing write_xform no longer stops a write, a payload that is not a number
+        // would reach TLV.build and be encoded as garbage. Drop it rather than send nonsense.
+        if (!Number.isFinite(value)) {
+            log('status', this.id, `ignoring write of ${prop}: ${mqttValue} is not a number`)
+            return
+        }
 
         var doWrite = true
         if (def.write_callback) doWrite = def.write_callback(value)

@@ -101,6 +101,31 @@ describe(MODEL_ID, () => {
         dev.drop()
     })
 
+    /*
+     * The target-humidity entity had a state topic, a command topic and a working read, and every
+     * one of those was covered here - but nothing checked that a write left the handler, and it did
+     * not: the field has no write_xform, which used to make the base drop the write in silence.
+     * Verified against the physical dehumidifier, which answered a 0x253 = 55 write with
+     * airState.humidity.desired = 55.
+     */
+    test('setting the target humidity actually reaches the wire', (t) => {
+        const { thinq, dev } = build(t)
+        thinq.emit('data', buf(F_FANTABLE_HIGH)) // seed fan (0x1fa)
+        thinq.emit('data', buf(F_MODE_SMART)) // seed mode (0x1f9)
+        thinq.emit('data', buf(F_POWER_ON))
+        thinq.resetRecorder()
+
+        dev.setProperty('humidifier-target_humidity', '55')
+
+        assert.equal(thinq.outbox.length, 1, 'one write frame')
+        const tlv = sentTLVs(thinq.outbox[0])
+        assert.equal(tlv[0x253], 55, 'target humidity on the wire')
+        assert.equal(tlv[0x1f9], 17, 'mode attached')
+        assert.equal(tlv[0x1fa], 6, 'fan attached')
+
+        dev.drop()
+    })
+
     test('selecting a mode from off turns the unit on in one frame', (t) => {
         const { thinq, dev } = build(t)
         // seed fan (0x1fa) + target (0x253) so the attached tags carry real values

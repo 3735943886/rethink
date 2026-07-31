@@ -145,3 +145,30 @@ test('setProperty with write_attach as array sends additional TLVs', () => {
     assert.equal(tlv[1].t, 0x201)
     assert.equal(tlv[1].v, 9)
 })
+
+// A write_xform maps a name to a wire value or scales one. A field that needs neither used to get
+// its writes dropped without a word, which is how the dehumidifier's target-humidity slider came to
+// send nothing at all while looking entirely healthy in HA.
+test('setProperty on a field with no write_xform sends the value as-is', () => {
+    const { thinq, dev, config } = makeDevice()
+    dev.addField(config, { id: 0x210, name: 'plain', comp: 'c' })
+
+    dev.setProperty('c-plain', '55')
+    assert.equal(thinq.outbox.length, 1, 'a packet is emitted')
+
+    const out = thinq.outbox[0]
+    const tlv = TLV.parse(out.subarray(11, out.length - 2))
+    assert.equal(tlv[0].t, 0x210)
+    assert.equal(tlv[0].v, 55)
+    assert.equal(dev.raw_clip_state[0x210], 55)
+})
+
+// The flip side of the above: a payload that is not a number would otherwise be encoded as garbage.
+test('setProperty drops a non-numeric payload rather than encoding nonsense', () => {
+    const { thinq, dev, config } = makeDevice()
+    dev.addField(config, { id: 0x211, name: 'plain', comp: 'c' })
+
+    dev.setProperty('c-plain', 'not-a-number')
+    assert.equal(thinq.outbox.length, 0, 'nothing on the wire')
+    assert.equal(dev.raw_clip_state[0x211], undefined, 'and no phantom state')
+})
