@@ -1,6 +1,7 @@
 import * as mqtt from 'mqtt'
 import { TypedEmitter } from 'tiny-typed-emitter'
 import { HAConfig } from '@/util/config'
+import { KeyedDebounce } from '@/util/debounce'
 import log from '@/util/logging'
 
 // Notes on availability topic handling:
@@ -17,6 +18,22 @@ import log from '@/util/logging'
 //	  `rethink` instance starts.
 // 7. To solve this, we subscribe to the availability topics and clean up all the retained "online"
 // 	  messages on startup.
+// 8. An appliance that abandons its session and immediately re-establishes it is not a device that
+//    went away, so it must not be published as one - see AVAILABILITY_GRACE_MS.
+
+/*
+ * LG's Wi-Fi modules routinely drop their cloud session and re-run the whole provisioning
+ * handshake. rethink sees the old session end and a new one begin - 9 to 234 milliseconds apart in
+ * a day of captures - and rebuilds the Home Assistant device in between, which flaps the
+ * availability topic and leaves an "unavailable" mark in the history of an appliance that was never
+ * actually away. The quietest appliances suffer most: one that reports its status once an hour
+ * gives the access point no traffic to see, so it is the first to be aged out and reconnect.
+ *
+ * So "offline" waits a moment before it goes out, and an "online" for the same device within that
+ * window cancels it - nothing is published, because nothing happened. The cost is that a device
+ * that really is gone is reported this much later, which no consumer of the topic cares about.
+ */
+const AVAILABILITY_GRACE_MS = 5000
 
 function recursiveReplace(obj: unknown, replacements: Record<string, string>): unknown {
     if (Array.isArray(obj)) {
@@ -48,6 +65,9 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
 
     // record for which devices we have published the availability topic during this connection
     readonly publishedAvailability = new Set<string>()
+
+    // "offline" publishes held back for the grace period, keyed by device id
+    readonly deferredOffline = new KeyedDebounce()
 
     constructor(readonly config: HAConfig) {
         super()
@@ -137,15 +157,30 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
     }
 
     publishProperty(id: string, property: string, value: string | number, options?: mqtt.IClientPublishOptions) {
-        if (!options) options = { retain: true } // FIXME?
+        const opts = options ?? { retain: true } // FIXME?
+        const payload = typeof value === 'number' ? value.toString() : value
 
-        if (typeof value === 'number') value = value.toString()
+        if (property === 'availability') {
+            // whichever way availability just moved, it supersedes anything held back for this device
+            this.deferredOffline.cancel(id)
 
+            if (payload === 'offline') {
+                this.deferredOffline.defer(id, AVAILABILITY_GRACE_MS, () =>
+                    this.publishNow(id, property, payload, opts),
+                )
+                return
+            }
+        }
+
+        this.publishNow(id, property, payload, opts)
+    }
+
+    private publishNow(id: string, property: string, payload: string, options: mqtt.IClientPublishOptions) {
         const deviceTopic = `${this.config.rethink_prefix}/${id}`
         if (property === 'availability') this.publishedAvailability.add(id)
 
-        log('publish', id, property, value)
-        this.client.publish(deviceTopic + '/' + property, value, options)
+        log('publish', id, property, payload)
+        this.client.publish(deviceTopic + '/' + property, payload, options)
     }
 }
 
