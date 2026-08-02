@@ -258,6 +258,18 @@ get('btn_thinq_logout_continue').onclick = async () => {
     M.Modal.getInstance(get('thinq_logout')).close()
 }
 
+/*
+ * A page restored from the browser's back/forward cache comes back with its WebSocket already closed
+ * - the browser closes it on the way in. The close handler then hides everything behind
+ * .hide-when-offline, so pressing Back from the monitor lands on a panel with no device list and a red
+ * status, and it stays that way until the five-second retry fires. Reconnect the moment the page is
+ * shown instead.
+ */
+window.addEventListener('pageshow', (ev) => {
+    if (!ev.persisted) return // a full load runs connect() on its own
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) connect()
+})
+
 function get(id) {
     return document.getElementById(id)
 }
