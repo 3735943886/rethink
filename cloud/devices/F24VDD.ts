@@ -98,24 +98,27 @@ const STATE: Record<number, string> = {
     101: 'Audible diagnosis',
 }
 
-// Dial course codes, each one named by the cloud during the sweep.
+// Dial course codes, each one named by the cloud during the sweep. The names are the ones the panel
+// and the app actually print, taken from this model's language pack rather than from the enum
+// identifiers - which have drifted: code 1 is STEAM_CLEANING on the wire but the model JSON's own
+// comment records it being renamed, and the machine calls it Steam Refresh.
 const COURSE: Record<number, string> = {
     0: 'None',
-    1: 'Steam Cleaning',
-    2: 'Allergy Care',
-    3: 'Utility',
-    4: 'Boil Wash',
-    5: 'Baby Wear',
-    6: 'Heavy Duty',
-    7: 'Cotton',
-    8: 'Speed Wash',
-    9: 'Silent',
-    10: 'Colour Care',
-    11: 'Duvet',
-    12: 'Lingerie / Wool',
-    13: 'Rinse + Spin',
-    14: 'Downloaded course',
-    15: 'Tub Clean',
+    1: 'Steam Refresh', // 스팀리프레쉬 (enum STEAM_CLEANING)
+    2: 'Allergy Care', // 알러지케어
+    3: 'Functional Wear', // 기능성의류 (enum UTILITY)
+    4: 'Economy Boil', // 알뜰삶음 (enum SPEEDBOIL)
+    5: 'Baby Wear', // 아기옷
+    6: 'Heavy Duty', // 찌든때
+    7: 'Cotton', // 표준
+    8: 'Speed Wash', // 스피드워시
+    9: 'Quiet', // 조용조용 (enum SILENT)
+    10: 'Colour Care', // 컬러케어
+    11: 'Duvet', // 이불
+    12: 'Lingerie / Wool', // 란제리/울
+    13: 'Rinse + Spin', // 헹굼+탈수
+    14: 'Downloaded course', // 다운로드코스
+    15: 'Tub Clean', // 통살균
 }
 
 // The course the machine actually runs, a wider table than the dial's - a downloaded or smart course
