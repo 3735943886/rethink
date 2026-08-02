@@ -11,14 +11,25 @@ import {
     CourseSelection,
     codeOf,
     courseControl,
+    reportCommandAck,
     shortControl,
 } from './monitoring_command'
 
 // LG front-load washer sold in Korea - matched on modelId "F24VDD" (an AI DD 24 kg drum washer),
 // deviceType 201. AABB frames start with 0x20 and are discriminated by the second byte:
 //   0xEC  the regular status report, two stacked 34-byte monitoring records (see monitoring_record.ts),
-//   0xEB  the same record on its own, sent right after the appliance (re)connects,
-//   0xBD / 0xCD  ~410-byte full dumps, and 0x31 (serial), 0xE2, 0x72, 0xD8, 0x19, 0x00 - not decoded.
+//   0xEB / 0xE2  the same record on its own, after a (re)connect and at the start of a cycle,
+//   0x00  the answer to a command (see monitoring_command.ts),
+//   0x31  two board serial numbers in ASCII, each with a counter beside it,
+//   0xBD / 0xCD  ~405-byte diagnostic dumps, and 0x72, 0xD8, 0x19 - not decoded.
+//
+// The dumps are telemetry rather than settings: 0xCD arrives every five minutes while a cycle runs and
+// 0xBD at each state change, and both begin with a copy of the live state - dump[8] is the state code,
+// dump[9:11] the remaining time, dump[35:37] the same energy counter as rec[17:19], matched against 60
+// consecutive samples. The rest is sensor history in rolling groups of four to five bytes. None of it
+// is decoded here: nothing names those bytes, and the obvious reading - that the ramp climbing to ~88
+// is the water temperature - dies on the evidence, since it peaks at the same value in a 60 °C wash and
+// a 95 °C one.
 //
 // The offsets below came from the appliance's own cloud rather than from static analysis: with the
 // washer bridged, a fromDevice frame whose payload byte i held the value i was injected, and the cloud
@@ -601,6 +612,8 @@ export default class Device extends AABBDevice {
     }
 
     processAABB(buf: Buffer) {
+        if (reportCommandAck(buf, DEV_BYTE, this.id)) return
+
         const rec = currentRecord(buf, DEV_BYTE, PAYLOAD_LEN)
         if (!rec) return
 

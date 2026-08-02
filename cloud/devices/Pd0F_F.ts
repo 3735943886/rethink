@@ -11,12 +11,14 @@ import {
     CourseSelection,
     codeOf,
     courseControl,
+    reportCommandAck,
     shortControl,
 } from './monitoring_command'
 
 // LG "2nd Mini Washer" - the pedestal drawer washer sold in Korea, matched on modelId "Pd0F_F",
 // deviceType 201. AABB frames start with 0x20 and carry a 25-byte monitoring record (see
-// monitoring_record.ts).
+// monitoring_record.ts). It answers every command with a four-byte 0x00 frame, handled by the shared
+// helper, and reports two board serial numbers in ASCII behind 0x31.
 //
 // This appliance switches its own Wi-Fi module off when it has nothing to do, so it spends most of its
 // life offline and only appears on the wire while it is powered on or running. That is normal for the
@@ -378,6 +380,8 @@ export default class Device extends AABBDevice {
     }
 
     processAABB(buf: Buffer) {
+        if (reportCommandAck(buf, DEV_BYTE, this.id)) return
+
         const rec = currentRecord(buf, DEV_BYTE, PAYLOAD_LEN)
         if (!rec) return
 

@@ -11,12 +11,15 @@ import {
     CourseSelection,
     codeOf,
     courseControl,
+    reportCommandAck,
     shortControl,
 } from './monitoring_command'
 
 // LG heat-pump dryer sold in Korea - matched on modelId "RH14_N_KR", nameplate "Hisen Refresh 27inch
 // 14kg", deviceType 202. AABB frames start with 0x30 and carry a 25-byte monitoring record (see
-// monitoring_record.ts); 0x72 heartbeats are not decoded.
+// monitoring_record.ts); 0x72 heartbeats are not decoded. The dryer also answers every command with
+// a four-byte 0x00 frame and repeats its record behind 0xE2 when a cycle starts, both handled by the
+// shared helpers, and reports two board serial numbers in ASCII behind 0x31.
 //
 // The offsets below came from the appliance's own cloud, not from static analysis: with the dryer
 // bridged, a fromDevice frame whose payload byte i held the value i was injected, and the cloud replied
@@ -424,6 +427,8 @@ export default class Device extends AABBDevice {
     }
 
     processAABB(buf: Buffer) {
+        if (reportCommandAck(buf, DEV_BYTE, this.id)) return
+
         const rec = currentRecord(buf, DEV_BYTE, PAYLOAD_LEN)
         if (!rec) return
 

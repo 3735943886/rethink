@@ -11,12 +11,16 @@ import {
     CourseSelection,
     codeOf,
     courseControl,
+    reportCommandAck,
     shortControl,
 } from './monitoring_command'
 
 // LG Styler (steam clothing care cabinet) sold in Korea - matched on modelId "S3BF_POD_DN4", nameplate
 // "Essence_ESL", deviceType 203. AABB frames start with 0x31 and carry a 28-byte monitoring record
-// (see monitoring_record.ts); 0x72 heartbeats are not decoded.
+// (see monitoring_record.ts); 0x72 heartbeats are not decoded. The cabinet answers every command with
+// a four-byte 0x00 frame, and reports two board serial numbers in ASCII behind 0x31. Its 0xB2 frames
+// repeat the cycle time and the energy counter and then, in the longer variant, what looks like a
+// history log in six-byte entries - left alone, since nothing names those fields.
 //
 // The byte offsets below were read out of the appliance's own cloud, not guessed: a fromDevice frame
 // whose payload byte i simply held the value i was injected while bridged, and the cloud answered with
@@ -444,6 +448,8 @@ export default class Device extends AABBDevice {
     }
 
     processAABB(buf: Buffer) {
+        if (reportCommandAck(buf, DEV_BYTE, this.id)) return
+
         const rec = currentRecord(buf, DEV_BYTE, PAYLOAD_LEN)
         if (!rec) return
 

@@ -5,6 +5,7 @@ import {
     CONTROL_POWER_OFF,
     CourseSelection,
     codeOf,
+    commandAck,
     courseControl,
     shortControl,
 } from '@/cloud/devices/monitoring_command'
@@ -121,6 +122,24 @@ describe('S3BF_POD_DN4 start', () => {
 
     test('a course the app will not start remotely either is not started', () => {
         assert.equal(stylerStart(23), undefined) // Indoor Dry 120 min
+    })
+})
+
+describe('command acknowledgements', () => {
+    test('an accepted command, as the dryer answered the start above', () => {
+        assert.deepEqual(commandAck(Buffer.from('30002600', 'hex'), 0x30), { command: 0x26, refused: false })
+    })
+
+    test('a refusal, as this washer answered a power-off with nothing to power off', () => {
+        assert.deepEqual(commandAck(Buffer.from('200024ff', 'hex'), 0x20), { command: 0x24, refused: true })
+    })
+
+    test('another appliance model on the same connection is not read as an answer', () => {
+        assert.equal(commandAck(Buffer.from('30002600', 'hex'), 0x20), undefined)
+    })
+
+    test('a status report is not an answer', () => {
+        assert.equal(commandAck(Buffer.from('20ec0022', 'hex'), 0x20), undefined)
     })
 })
 

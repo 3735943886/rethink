@@ -38,7 +38,21 @@ describe('currentRecord', () => {
         assert.equal(currentRecord(damaged, 0x20, 34), undefined)
     })
 
-    test('frame types other than 0xEC/0xEB are left alone', () => {
+    test('an 0xE2 frame yields its record, behind the 03 header the appliance uses there', () => {
+        // the frame this dryer sent the instant it accepted a start command
+        const body = Buffer.from('30e2' + '0319' + '020128012807000302000000000000895004f0010000007000', 'hex')
+        const rec = currentRecord(body, 0x30, 25)
+        assert.equal(rec?.length, 25)
+        assert.equal(rec?.[0], 0x02) // running
+        assert.equal(rec?.[5], 0x07) // the course the start command had just asked for
+    })
+
+    test('an 0xE2 frame with the 00 header of the other flavours is rejected', () => {
+        const body = Buffer.from('30e2' + '0019' + '02'.repeat(25), 'hex')
+        assert.equal(currentRecord(body, 0x30, 25), undefined)
+    })
+
+    test('frame types other than 0xEC/0xEB/0xE2 are left alone', () => {
         const heartbeat = Buffer.from('2072000000', 'hex')
         assert.equal(currentRecord(heartbeat, 0x20, 34), undefined)
     })

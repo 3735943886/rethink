@@ -24,6 +24,8 @@
 // caught starting: the washer's Colour Care, Heavy Duty and Steam Refresh, the dryer's Cotton Normal,
 // the mini washer's Small Load and the styler's Fine Dust all encode byte for byte as captured.
 
+import log from '@/util/logging'
+
 export const CONTROL_POWER_OFF = 0x01
 export const CONTROL_PAUSE = 0x04
 
@@ -34,6 +36,36 @@ export function shortControl(type: number): Buffer {
 
 export function courseControl(payload: Buffer): Buffer {
     return Buffer.concat([Buffer.from([0xf0, 0x26]), payload])
+}
+
+/*
+ * Every command this family accepts is answered, about a second later, with a four-byte frame:
+ *
+ *   [device] 00 <the command byte> <status>      status 0 = done, 0xff = refused
+ *
+ * Confirmed across all four appliances and every command type - 0x24, 0x25, 0x26 and even the cloud's
+ * weather push 0x66. The refusals are real and informative: this washer answered 0xff to a power-off
+ * three separate times, each while it had nothing to power off.
+ *
+ * The absence of an answer is worth as much as its presence. A command that goes unanswered is one the
+ * appliance never saw, and the cloud retries it three times at five-second intervals - which is exactly
+ * the signature left behind by rethink's own observe-only mode holding a frame back.
+ */
+export function commandAck(buf: Buffer, devByte: number): { command: number; refused: boolean } | undefined {
+    if (buf.length !== 4 || buf[0] !== devByte || buf[1] !== 0x00) return undefined
+    return { command: buf[2], refused: buf[3] !== 0 }
+}
+
+// Says so in the log and reports whether the frame was an answer, so a handler can stop looking at it.
+// Nothing is published: an appliance that refuses a command does not change state, and an entity that
+// reported the refusal would have nothing to change back to.
+export function reportCommandAck(buf: Buffer, devByte: number, id: string): boolean {
+    const ack = commandAck(buf, devByte)
+    if (!ack) return false
+
+    const command = `0x${ack.command.toString(16)}`
+    log('status', id, ack.refused ? `command ${command} refused by the appliance` : `command ${command} accepted`)
+    return true
 }
 
 // Turns the name Home Assistant sends back into the wire code, using the table the handler already
