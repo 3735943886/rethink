@@ -55,6 +55,12 @@ class DeviceEntry {
         const children = []
 
         let td
+        // The owner's own name for the appliance, which only the bridge can know. Without it four
+        // identical ceiling cassettes are four rows of the same model and a different UUID.
+        td = document.createElement('td')
+        td.innerText = this.remoteState.name || '—'
+        children.push(td)
+
         td = document.createElement('td')
         td.innerText = this.id
         children.push(td)
