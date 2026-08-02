@@ -27,6 +27,7 @@ import WPU4CIGCR from './devices/1WPU4CIGCR__2'
 import DHUM_231006_WW from './devices/DHUM_231006_WW'
 import F24VDD from './devices/F24VDD'
 import RH14_N_KR from './devices/RH14_N_KR'
+import S3BF_POD_DN4 from './devices/S3BF_POD_DN4'
 import { Device as T1Device } from './thinq1/device'
 import { Device as T2Device } from './thinq2/device'
 import { type Connection } from './homeassistant'
@@ -73,6 +74,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     DHUM_231006_WW, // LG dehumidifier sold in Korea (deviceType 403, TLV state frames marked 0xa7)
     F24VDD, // LG AI DD front-load washer sold in Korea (deviceType 201), status only
     RH14_N_KR, // LG heat-pump dryer sold in Korea (deviceType 202), status only
+    S3BF_POD_DN4, // LG Styler clothing care cabinet (deviceType 203), status only
 }
 
 class Bridge {
