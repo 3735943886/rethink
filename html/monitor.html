@@ -69,6 +69,50 @@
             .reduced_margins .input-field {
                 margin: 4px;
             }
+
+            /*
+             * The two switches used to be floated inside the "Messages" heading, which made the
+             * heading a layout container: when the row ran out of width the float dropped below it and
+             * took half of the second switch with it, leaving its name on one line and its lever on the
+             * next. Here each switch is one inline-flex unit that cannot be split, and the row wraps
+             * between them instead.
+             */
+            .monitor-controls {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 4px 24px;
+                margin-bottom: 8px;
+            }
+
+            .monitor-controls .toggle {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                white-space: nowrap;
+                border-radius: 4px;
+                padding: 2px 8px;
+            }
+
+            .monitor-controls .toggle > label {
+                cursor: pointer;
+            }
+
+            /* The lever alone says on or off; the words doubled the width of every switch. */
+            .monitor-controls .switch label .lever {
+                margin: 0;
+            }
+
+            /*
+             * Observe only is a mode that silently swallows everything the cloud sends this appliance,
+             * and a lever nudged 20 pixels to the right is not enough of a warning for that - mistaking
+             * it for off is how a styler once took a start command for real. It wears the same red as an
+             * injected message while it is on.
+             */
+            .monitor-controls.blocking .toggle-observe {
+                background: #c04040;
+                color: white;
+            }
         </style>
         <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
         <link
@@ -95,26 +139,24 @@
         </div>
 
         <div class="reduced_margins container flex_y flex_grow" style="overflow: hidden">
-            <h4 class="header orange-text">
-                Messages
-                <div style="float: right">
-                    <label
-                        for="blocktodevice"
-                        title="Record what the cloud sends without letting the appliance act on it"
-                        >Observe only</label
-                    >
+            <h4 class="header orange-text">Messages</h4>
+            <div class="monitor-controls" id="monitor_controls">
+                <span
+                    class="toggle toggle-observe"
+                    title="Record what the cloud sends without letting the appliance act on it"
+                >
+                    <label for="blocktodevice">Observe only</label>
                     <span class="switch">
-                        <label>Off <input id="blocktodevice" type="checkbox" /> <span class="lever"></span>On</label>
+                        <label><input id="blocktodevice" type="checkbox" /> <span class="lever"></span></label>
                     </span>
-                    &nbsp;&nbsp;
+                </span>
+                <span class="toggle">
                     <label for="autoscroll">Auto-scroll</label>
                     <span class="switch">
-                        <label
-                            >Off <input id="autoscroll" type="checkbox" checked /> <span class="lever"></span>On</label
-                        >
+                        <label><input id="autoscroll" type="checkbox" checked /> <span class="lever"></span></label>
                     </span>
-                </div>
-            </h4>
+                </span>
+            </div>
             <div class="flex_grow" id="messages"></div>
             <div class="flex_x">
                 <div class="input-field flex_grow">

@@ -43,7 +43,10 @@ function connect() {
         // whatever comes back, so opening or reloading a page never lifts a block someone else set.
         const block = get('blocktodevice')
         const sendBlock = () => ws.send(JSON.stringify({ blockToDevice: block.checked }))
-        block.onchange = sendBlock
+        block.onchange = () => {
+            sendBlock()
+            showBlockState()
+        }
         if (block.checked) sendBlock() // this page had it on before the socket dropped: ask again
     }
 
@@ -66,7 +69,10 @@ function connect() {
                 }
             }
 
-            if (json.blockToDevice !== undefined) get('blocktodevice').checked = json.blockToDevice
+            if (json.blockToDevice !== undefined) {
+                get('blocktodevice').checked = json.blockToDevice
+                showBlockState()
+            }
 
             if (json.status) {
                 get('device_status').innerText = json.status
@@ -101,6 +107,12 @@ function connect() {
 window.addEventListener('pageshow', (ev) => {
     if (ev.persisted) connect()
 })
+
+// Observe only holds back everything addressed to the appliance, which is invisible until something
+// does not happen. Mark the switch itself while it is on, so the page says so rather than implying it.
+function showBlockState() {
+    get('monitor_controls').classList.toggle('blocking', get('blocktodevice').checked)
+}
 
 function pushMessage(direction, payload, injected) {
     const timestamp = document.createElement('span')
