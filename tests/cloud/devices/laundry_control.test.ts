@@ -141,6 +141,11 @@ describe('command acknowledgements', () => {
     test('a status report is not an answer', () => {
         assert.equal(commandAck(Buffer.from('20ec0022', 'hex'), 0x20), undefined)
     })
+
+    test('a zero says the frame arrived, not that the appliance implements it', () => {
+        // The styler answers this for a control type that means nothing, and then does nothing.
+        assert.deepEqual(commandAck(Buffer.from('31002400', 'hex'), 0x31), { command: 0x24, refused: false })
+    })
 })
 
 describe('the frame around a payload', () => {

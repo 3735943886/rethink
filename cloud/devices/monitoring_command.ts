@@ -41,15 +41,23 @@ export function courseControl(payload: Buffer): Buffer {
 /*
  * Every command this family accepts is answered, about a second later, with a four-byte frame:
  *
- *   [device] 00 <the command byte> <status>      status 0 = done, 0xff = refused
+ *   [device] 00 <the command byte> <status>      status 0 = taken, 0xff = refused
  *
  * Confirmed across all four appliances and every command type - 0x24, 0x25, 0x26 and even the cloud's
  * weather push 0x66. The refusals are real and informative: this washer answered 0xff to a power-off
  * three separate times, each while it had nothing to power off.
  *
+ * "Taken" is as much as a zero status says, and it is worth less than it looks. The styler answers 0
+ * to a short control carrying a type of 0x7f, which means nothing at all, and to two more its model
+ * JSON does not implement - and then does nothing about any of them. So a zero is the appliance saying
+ * the frame arrived and was well formed, not that it understood it. Proving a command does something
+ * needs the state the appliance reports afterwards, not its acknowledgement.
+ *
  * The absence of an answer is worth as much as its presence. A command that goes unanswered is one the
  * appliance never saw, and the cloud retries it three times at five-second intervals - which is exactly
- * the signature left behind by rethink's own observe-only mode holding a frame back.
+ * the signature left behind by rethink's own observe-only mode holding a frame back. A frame with a
+ * length byte that does not match its own length is not answered either: four such went out during the
+ * probe above and every one was ignored.
  */
 export function commandAck(buf: Buffer, devByte: number): { command: number; refused: boolean } | undefined {
     if (buf.length !== 4 || buf[0] !== devByte || buf[1] !== 0x00) return undefined

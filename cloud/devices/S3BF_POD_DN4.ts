@@ -70,6 +70,17 @@ const DOWNLOAD_COURSE_OFFSET = 24
 const STATE_OFF = 0
 const STATE_PAUSED = 3
 
+/*
+ * There is no way to switch this cabinet on from here, and the absence was measured rather than
+ * assumed. A newer styler of the same protocol family takes a power-on as `f0 24 01 01 01`, a remote
+ * control switch as `f0 24 10 01 01`, and its buzzer, end melody and night-care times as `f0 24 13`
+ * sub-commands. All four were sent to this appliance. It answered every one of them with a plain
+ * acknowledgement and then did nothing, which is exactly what it does with a control type of 0x7f -
+ * and its model JSON agrees, listing only downloadCourse, offPower, startCourse, resumeCourse,
+ * pauseCourse and wakeup, where wakeup carries no value and wakes the Wi-Fi module rather than the
+ * cabinet.
+ */
+
 // State codes, every one of them named by stepping rec[0] through 0..127 and reading the cloud's
 // decode back. The model JSON's Value.State is a name->label dict with no index, and its key order is
 // NOT the wire code: it lists PRESTEAM..FOTA as entries 10-19, while the appliance really sends 50-59
