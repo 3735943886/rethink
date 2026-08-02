@@ -137,6 +137,60 @@ describe(MODEL_ID, () => {
         assert.equal(props(ha).cold_water_total, 0x1234)
     })
 
+    /*
+     * The frames below are the ones this appliance was really sent. Each changed its setting and came
+     * back in the next status frame, which is the only proof that counts here - the appliance answers
+     * `12 00 17` either way.
+     */
+    describe('writes', () => {
+        test('the default dispense amount, as the appliance took it', () => {
+            const { thinq, dev } = makeDevice()
+            dev.setProperty('default_water_amount', '250 ml')
+            assert.equal(
+                thinq.outbox[0].toString('hex'),
+                'aa20f017ffffffffffffffffffffff02ffffffffffffffffffffffffffffefbb',
+            )
+        })
+
+        test('the button sound, as the appliance took it', () => {
+            const { thinq, dev } = makeDevice()
+            dev.setProperty('button_sound', 'OFF')
+            assert.equal(
+                thinq.outbox[0].toString('hex'),
+                'aa20f017ffffffffffffffffffffffff00ffffffffffffffffffffffffffedbb',
+            )
+        })
+
+        test('one setting travels at a time, and the rest of the record says "leave it"', () => {
+            const { thinq, dev } = makeDevice()
+            dev.setProperty('auto_care', 'ON')
+
+            const record = thinq.outbox[0].subarray(4, -2)
+            assert.equal(record.length, 26)
+            assert.equal(record[20], 1)
+            assert.equal(record.filter((byte) => byte !== 0xff).length, 1)
+        })
+
+        test('the default water type goes out as its code', () => {
+            const { thinq, dev } = makeDevice()
+            dev.setProperty('default_water', 'Normal')
+            assert.equal(thinq.outbox[0].subarray(4, -2)[10], 2)
+        })
+
+        test('nothing is published from a write - the appliance is what says so', () => {
+            const { ha, dev } = makeDevice()
+            dev.setProperty('auto_care', 'ON')
+            assert.equal(props(ha).auto_care, undefined)
+        })
+
+        test('a name outside the table, and a property that is not writable, send nothing', () => {
+            const { thinq, dev } = makeDevice()
+            dev.setProperty('default_water', 'Sparkling')
+            dev.setProperty('water_selection', 'Cold') // reports what the tap is set to; not a control
+            assert.deepEqual(thinq.outbox, [])
+        })
+    })
+
     test('frames of other types and malformed frames are ignored', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', SAMPLE_UV_DONE)

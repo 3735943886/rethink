@@ -62,8 +62,28 @@ import AABBDevice from './aabb_device'
  * cloud keeps rather than state the appliance holds: when the water line and the outlet were last
  * cleaned, how many sterilisations ran last month, and when the filter was last changed.
  *
- * Read-only, and the model agrees: Config says supportControl false, and the cloud reports the
- * appliance as controllableYn "N".
+ * IT IS NOT READ-ONLY, THOUGH EVERYTHING SAYS IT IS
+ * --------------------------------------------------
+ * Config says supportControl false, ControlWifi carries an empty command set, and the cloud reports
+ * the appliance as controllableYn "N". All three describe LG's legacy control path, which LG has
+ * retired; the capability API that replaced it does control this model, and the frame it sends is
+ * simply the record above, written back:
+ *
+ *   aa 20 f0 17 | 26-byte record, 0xff for every field to leave alone | ck bb
+ *
+ * So the read map below doubles as the write map. Five settings were sent to this appliance, each one
+ * changed and then put back, and every one came back in the next status frame - which is the proof
+ * that matters, since the appliance's `12 00 17` answer arrives whether or not it did anything:
+ *
+ *   [8] unused-water notice   [10] default water   [11] default amount
+ *   [12] button sound         [20] auto care
+ *
+ * `f0 17` is not this model's own invention: the fridge drivers here build the same frame, 0xff-filled.
+ *
+ * Not offered: the four sterilisation-schedule bytes. They are writable in the same frame, but LG's own
+ * schema carries only a time, and a time-only write moves the weekly run to a different weekday - the
+ * appliance replaces its month/day anchor with the one implied by what it was sent. Reading it is
+ * useful, writing it silently reschedules.
  */
 
 const STATUS_FRAME_TYPE = 0xec
@@ -91,8 +111,25 @@ const STERILIZE_HOUR = 17
 const STERILIZE_MIN = 18
 const AUTO_CARE = 20
 
-// The model writes its "this unit has no such thing" value as 255 and names it IGNORE.
+// The model writes its "this unit has no such thing" value as 255 and names it IGNORE. The same 255
+// means "leave this field as it is" in the other direction, which is what makes a write of one setting
+// possible at all: the frame carries the whole record either way.
 const IGNORE = 255
+const SET_FRAME_TYPE = 0x17
+
+// A write: the record with every field left alone but the ones named.
+export function setRecord(fields: Record<number, number>): Buffer {
+    const record = Buffer.alloc(RECORD_LENGTH, IGNORE)
+    for (const [offset, value] of Object.entries(fields)) record[Number(offset)] = value
+    return Buffer.concat([Buffer.from([0xf0, SET_FRAME_TYPE]), record])
+}
+
+// The name Home Assistant sends back, turned into the code the record carries, through the same table
+// the state is published with.
+function codeFor(table: Record<number, string>, name: string) {
+    const found = Object.entries(table).find(([, label]) => label === name)
+    return found ? Number(found[0]) : undefined
+}
 
 const MON_STATUS_NAMES: Record<number, string> = {
     0: 'Failed',
@@ -129,6 +166,15 @@ const DEFAULT_WATER_NAMES: Record<number, string> = {
     1: 'Last used',
     2: 'Normal',
     3: 'Cold',
+}
+
+// What the default may be set to, which is the amounts without "Continuous" - that one is the button
+// being held down rather than a quantity to come back to, and the model's own defaultWaterAmountMode
+// enum stops at three.
+const DEFAULT_AMOUNT_NAMES: Record<number, string> = {
+    1: AMOUNT_NAMES[1],
+    2: AMOUNT_NAMES[2],
+    3: AMOUNT_NAMES[3],
 }
 
 // The counters, in the order Config.waterConfig lists the taps. They are today's totals, not
@@ -183,6 +229,36 @@ function binarySensor(id: string, name: string, icon: string, extra?: object): C
     })
 }
 
+/*
+ * The settings that can be written. Their state still comes from the appliance rather than from what
+ * was asked for: the record arrives a second after the write, so there is nothing to assume and
+ * nothing to roll back if the appliance declines.
+ */
+function select(id: string, name: string, icon: string, options: string[]): ComponentInfo {
+    return allowExtendedType({
+        platform: 'select',
+        unique_id: `$deviceid-${id}`,
+        state_topic: `$this/${id}`,
+        command_topic: `$this/${id}/set`,
+        name,
+        icon,
+        options,
+        entity_category: 'config',
+    })
+}
+
+function toggle(id: string, name: string, icon: string): ComponentInfo {
+    return allowExtendedType({
+        platform: 'switch',
+        unique_id: `$deviceid-${id}`,
+        state_topic: `$this/${id}`,
+        command_topic: `$this/${id}/set`,
+        name,
+        icon,
+        entity_category: 'config',
+    })
+}
+
 export default class Device extends AABBDevice {
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
@@ -199,22 +275,23 @@ export default class Device extends AABBDevice {
                         entity_category: 'diagnostic',
                     }),
 
-                    default_water: sensor('default_water', 'Default water', 'mdi:water-outline', {
-                        entity_category: 'diagnostic',
-                    }),
-                    default_water_amount: sensor('default_water_amount', 'Default amount', 'mdi:cup-outline', {
-                        entity_category: 'diagnostic',
-                    }),
+                    default_water: select(
+                        'default_water',
+                        'Default water',
+                        'mdi:water-outline',
+                        Object.values(DEFAULT_WATER_NAMES),
+                    ),
+                    default_water_amount: select(
+                        'default_water_amount',
+                        'Default amount',
+                        'mdi:cup-outline',
+                        // Continuous is a way of holding the button down, not a default to come back to.
+                        Object.values(DEFAULT_AMOUNT_NAMES),
+                    ),
 
-                    auto_care: binarySensor('auto_care', 'Auto care', 'mdi:auto-fix', {
-                        entity_category: 'diagnostic',
-                    }),
-                    button_sound: binarySensor('button_sound', 'Button sound', 'mdi:volume-high', {
-                        entity_category: 'diagnostic',
-                    }),
-                    not_use_notice: binarySensor('not_use_notice', 'Unused-water notice', 'mdi:bell-outline', {
-                        entity_category: 'diagnostic',
-                    }),
+                    auto_care: toggle('auto_care', 'Auto care', 'mdi:auto-fix'),
+                    button_sound: toggle('button_sound', 'Button sound', 'mdi:volume-high'),
+                    not_use_notice: toggle('not_use_notice', 'Unused-water notice', 'mdi:bell-outline'),
 
                     ...Object.assign(
                         {},
@@ -270,5 +347,27 @@ export default class Device extends AABBDevice {
 
     private processCounters(p: Buffer) {
         COUNTERS.forEach((c, i) => this.publishProperty(c.key, p.readUInt16BE(i * 2)))
+    }
+
+    // Nothing is published from here. The appliance sends a status frame about a second after taking a
+    // write, so the entity follows what the appliance says rather than what it was asked for - and a
+    // setting the appliance declines simply stays where it was.
+    setProperty(prop: string, mqttValue: string) {
+        const offset = {
+            default_water: DEFAULT_WATER_SET,
+            default_water_amount: DEFAULT_WATER_AMOUNT_MODE,
+            auto_care: AUTO_CARE,
+            button_sound: BUTTON_SOUND,
+            not_use_notice: NOT_USE_NOTICE,
+        }[prop]
+        if (offset === undefined) return
+
+        let value: number | undefined
+        if (prop === 'default_water') value = codeFor(DEFAULT_WATER_NAMES, mqttValue)
+        else if (prop === 'default_water_amount') value = codeFor(DEFAULT_AMOUNT_NAMES, mqttValue)
+        else value = mqttValue === 'ON' ? 1 : 0
+
+        if (value === undefined) return
+        this.send(setRecord({ [offset]: value }))
     }
 }

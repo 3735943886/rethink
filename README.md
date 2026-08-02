@@ -39,6 +39,8 @@ The following appliances are currently supported in rethink:
     - 👍 RH14_N_KR, 14 kg Heat-Pump Dryer (Korea) - status reporting, course selection, start/pause/power off
 - Clothing care:
     - 👍 S3BF_POD_DN4, LG Styler (Korea) - status reporting, course selection, start/pause/power off
+- Water:
+    - 👍 1WPU4CIGCR\_\_2, PuriCare water purifier (Korea) - status reporting, dispensed water, settings
 
 The supported appliances can be used "out of the box" with HomeAssistant or another compatible MQTT consumer.  
 Appliances not listed above can still be used with the bridge mode, but they will not be translated to MQTT. Contributions are welcome!
