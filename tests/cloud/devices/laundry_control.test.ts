@@ -131,10 +131,11 @@ describe('the frame around a payload', () => {
 })
 
 describe('CourseSelection', () => {
-    const COURSES: Record<number, string> = { 0: 'None', 6: 'Heavy Duty', 7: 'Cotton' }
+    const COURSES: Record<number, string> = { 0: 'None', 6: 'Heavy Duty', 7: 'Cotton', 14: 'Downloaded course' }
+    const STARTABLE = { 6: true, 7: true } // 14 is a dial position no start command can express
 
     test('follows the appliance until Home Assistant picks something', () => {
-        const selection = new CourseSelection()
+        const selection = new CourseSelection(STARTABLE)
         selection.follow(7)
         assert.equal(selection.selected, 7)
 
@@ -144,8 +145,19 @@ describe('CourseSelection', () => {
         assert.equal(selection.selected, 6)
     })
 
+    test('a dial position that cannot be started is not adopted', () => {
+        // Home Assistant rejects a select state outside its options, so following the washer onto its
+        // "Downloaded course" position turned every status report into an Invalid option error.
+        const selection = new CourseSelection(STARTABLE)
+        selection.follow(7)
+        selection.follow(14)
+        assert.equal(selection.selected, 7)
+        selection.select(14)
+        assert.equal(selection.selected, 7)
+    })
+
     test('the dial moving wins again', () => {
-        const selection = new CourseSelection()
+        const selection = new CourseSelection(STARTABLE)
         selection.follow(7)
         selection.select(6)
         selection.follow(0) // powered off: not a course, and not a reason to forget one

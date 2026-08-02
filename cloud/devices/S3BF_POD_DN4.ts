@@ -277,7 +277,7 @@ export function resumePayload(course: number): Buffer {
 const SELECTABLE = Object.keys(RECIPE).map((code) => COURSE[Number(code)])
 
 export default class Device extends AABBDevice {
-    private readonly course = new CourseSelection()
+    private readonly course = new CourseSelection(RECIPE)
     private state = STATE_OFF
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {

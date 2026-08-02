@@ -264,6 +264,12 @@ const PRESET: Record<number, [number, number, number, number, number, boolean, b
 // The start command's own layout. Its first fields are the settings in the order the model JSON lists
 // them, then the three option bytes carrying the record's own bit masks, then the course to run and
 // the smart course. The remaining nine bytes are padding to the declared length of 21.
+//
+// The same 21 bytes make up a course download - f0 25 03 15 in front of them instead of f0 26 - which
+// is where the last two fields show themselves: sending Sweat Stains into the download slot came out as
+// 0e 03 03 03 03 ... 0e 37, dial course 14 ("Downloaded course"), the settings, operating course 14
+// (Heavy Duty) and smart course 55. Downloading is not implemented; the layout is shared, so noting it
+// here keeps the two frames from being re-derived separately.
 const CMD_LEN = 21
 const CMD_COURSE = 0
 const CMD_SOIL = 1
@@ -322,7 +328,7 @@ const ERROR: Record<number, string> = {
 }
 
 export default class Device extends AABBDevice {
-    private readonly course = new CourseSelection()
+    private readonly course = new CourseSelection(PRESET)
     private state = STATE_OFF
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {

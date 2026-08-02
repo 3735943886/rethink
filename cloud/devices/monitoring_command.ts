@@ -53,20 +53,28 @@ export function codeOf(table: Record<number, string>, name: string): number | un
  * It follows the dial rather than mirroring it. Mirroring would work for exactly one status report:
  * every report repeats the same dial position, so a course picked in Home Assistant would be undone
  * a few seconds later. Following means the selection changes when the appliance's own course changes
- * - someone turned the dial, or a cycle started - and otherwise stays where it was put. Powering off
- * zeroes the course byte and is ignored, so the selection survives a power cycle.
+ * - someone turned the dial, or a cycle started - and otherwise stays where it was put.
+ *
+ * It only ever holds a course the handler can actually start. A dial has positions a start command
+ * cannot express - the washer's "Downloaded course", the styler's timed indoor dries - and a Home
+ * Assistant select rejects a state that is not one of the options it was given, so following those
+ * blindly turns every status report into an "Invalid option" error. Powering off, which zeroes the
+ * course byte, is ignored by the same rule, so the selection survives a power cycle.
  */
 export class CourseSelection {
     selected = 0
     private reported: number | undefined
 
+    // Keyed by course code - the handler's own table of what it knows how to start.
+    constructor(private readonly startable: Record<number, unknown>) {}
+
     follow(course: number) {
         if (course === this.reported) return
         this.reported = course
-        if (course !== 0) this.selected = course
+        if (course in this.startable) this.selected = course
     }
 
     select(code: number) {
-        this.selected = code
+        if (code in this.startable) this.selected = code
     }
 }

@@ -121,6 +121,10 @@ const PRESET: Record<number, [number, number, number, number, number, number, nu
 // The start command's own layout, 15 bytes: the settings in the order the model JSON lists them, then
 // the reserve time and the smart-course slot, then four option bytes of which only the last one has
 // ever been non-zero.
+//
+// The same 15 bytes make up a course download, behind f0 25 03 0f instead of f0 26: sending a smart
+// course into the slot came out as 01 00 01 00 04 ... 67, the course with its rinse count raised to 4
+// and the smart course 103 in byte 10, which is what pins that field. Downloading is not implemented.
 const CMD_LEN = 15
 const CMD_COURSE = 0
 const CMD_SOIL = 1
@@ -187,7 +191,7 @@ const TEMP: Record<number, string> = {
 }
 
 export default class Device extends AABBDevice {
-    private readonly course = new CourseSelection()
+    private readonly course = new CourseSelection(PRESET)
     private state = STATE_OFF
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {

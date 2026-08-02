@@ -215,7 +215,7 @@ const ERROR: Record<number, string> = {
 }
 
 export default class Device extends AABBDevice {
-    private readonly course = new CourseSelection()
+    private readonly course = new CourseSelection(PRESET)
     private state = STATE_OFF
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
