@@ -750,28 +750,14 @@ export default class Device extends TLVDevice {
      *         (buf[7] = 0x01, buf[8] = 0x10), and the 190-byte buf[7] = 0xfd frames
      *   0xa8  the 97-byte telemetry family - NOT TLV, see the class comment
      *
-     * The branch below is the base class' state-frame branch with the marker widened to
-     * accept 0xa7, so it is a strict superset; the delegation at the end therefore only ever
-     * hands the base class frames it would have ignored anyway, and nothing is processed
-     * twice. 0x87 is still accepted, so a firmware that behaves like every other model keeps
-     * working.
+     * Widening the marker is all this model needs, and the base class has a hook for exactly
+     * that, so only the marker is stated here and the rest of the frame test stays in one
+     * place. The set is widened rather than replaced: 0x87 is still accepted, so the write
+     * acknowledgements above keep being read, and so does a firmware that behaves like every
+     * other model.
      */
-    processData(buf: Buffer) {
-        if (
-            buf[2] === 0x04 &&
-            buf[3] === 0x00 &&
-            buf[4] === 0x00 &&
-            buf[5] === 0x00 &&
-            (buf[6] === 0x87 || buf[6] === 0xa7) &&
-            buf[7] === 0x02 &&
-            (buf[8] === 0x01 || buf[8] === 0x04) &&
-            buf[10] === buf.length - 13
-        ) {
-            this.processTLV(TLV.parse(buf.subarray(11, buf.length - 2)))
-            return
-        }
-
-        super.processData(buf)
+    isHeaderByte6(byte: number): boolean {
+        return byte === 0x87 || byte === 0xa7
     }
 
     /*
