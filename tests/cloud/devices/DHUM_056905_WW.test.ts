@@ -2,171 +2,329 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import DUT from '@/cloud/devices/DHUM_056905_WW'
 import type { Metadata } from '@/cloud/thinq'
-import { MockHAConnection, MockThinq2Device, buf } from '@/tests/helpers/mocks'
-import { enableMockTimers } from '@/tests/helpers/timers'
+import { MockHAConnection, MockThinq2Device, buf, hex } from '@/tests/helpers/mocks'
+import { enableMockTimers, tickMockTimers } from '@/tests/helpers/timers'
 import * as TLV from '@/util/tlv'
 
 const DEVICE_ID = 'test-id'
 const MODEL_ID = 'DHUM_056905_WW'
-const META: Metadata = { modelId: MODEL_ID, modelName: 'DHUM_056905_WW', swVersion: '1.0' }
+const META: Metadata = { modelId: MODEL_ID, modelName: 'TEST DHUM', swVersion: '9439' }
 
-// Real packet captures from a DHUM_056905_WW dehumidifier. Every frame keeps its UART header
-// byte6 = 0xA7 (the async/query marker this family uses instead of 0x87), so the tests exercise
-// the handler's header normalization end to end. Ground-truth tag per frame is noted inline.
-const F_POWER_ON = '000004000000a70204d8027dc17b82' //   0x1f7 = 1     power ON
-const F_POWER_OFF = '000004000000a70204a4027dc066e4' //  0x1f7 = 0     power OFF
-const F_MODE_SMART = '000004000000a70204ec037e5011ce3a' // 0x1f9 = 17   mode smart
-const F_MODE_JET = '00000400000087020423037e5012a818' //  0x1f9 = 18   mode jet (0x87 form)
-const F_TARGET_50 = '000004000000a70204fe0394d032e68a' //  0x253 = 50   target humidity 50 %
-const F_HUMIDITY_52 = '000004000000a70204b203cd9034d19c' // 0x336 = 52  current humidity 52 %
-const F_TEMP_58 = '000004000000a70204e7037f503a80fc' //     0x1fd = 58   temperature 29 C (raw/2)
-// Mode-caps table resent on a fan change: five 0x2d7/0x2d8/0x2d9 rows, all with 0x2d9 = 6 (high).
-const F_FANTABLE_HIGH =
-    '000004000000a70204e9287e50147e86b5d011b600b646b5d012b600b646b5d014b600b646b5d015b600b646b5d016b600b6462b2a'
-// Same table but 0x2d9 = 2 (low) — a pure fan-only change carries no standalone 0x1fa.
-const F_FANTABLE_LOW =
-    '000004000000a702043c257e82b5d011b600b642b5d012b600b642b5d014b600b642b5d015b600b642b5d016b600b64297e8'
+const CAPS_RESPONSE_HEX = '000004000000A70201000AB6A00A7CB541B5A004023220'
 
-function build(t: import('node:test').TestContext) {
-    enableMockTimers(t)
+const QUERY_RESPONSE_HEX = '00000400000087020400117DC17E50117E827F503094D023D801A8803F5E'
+
+/** Live notify: current humidity 0x336 = 48%. */
+const CURRENT_HUMIDITY_48_NOTIFY_HEX = (() => {
+    const tlv = TLV.build([{ t: 0x336, v: 48 }])
+    const body = [0x04, 0x00, 0x00, 0x00, 0xa7, 0x02, 0x04, 0x00, tlv.length, ...tlv]
+    // CRC not verified by processData; pad 2 bytes
+    return Buffer.from([0x00, 0x00, ...body, 0x00, 0x00])
+        .toString('hex')
+        .toUpperCase()
+})()
+
+function parseSentTlvs(packet: Buffer): TLV.TLV[] {
+    // Same framing as TLVDevice.processData: TLV payload at offset 11, CRC last 2 bytes
+    return TLV.parse(packet.subarray(11, packet.length - 2)).map(({ t, v }) => ({ t, v }))
+}
+
+/** Expected MODE_FAN_CAPS expansion for a requested fan speed. */
+function expectedFanSpeedTlvs(fan: 2 | 6): TLV.TLV[] {
+    const row = (mode: number, fanSpeed: number): TLV.TLV[] => [
+        { t: 0x2d7, v: mode },
+        { t: 0x2d8, v: 0 },
+        { t: 0x2d9, v: fanSpeed },
+    ]
+    return [
+        { t: 0x1fa, v: fan },
+        ...row(17, fan), // Smart
+        ...row(18, fan), // Jet
+        ...row(20, fan), // Spot
+        ...row(21, 6), // Laundry — always high
+        ...row(22, fan), // on-wire-only mode
+    ]
+}
+
+// Live notify when ionizer turned off on device panel
+const IONIZER_OFF_NOTIFY_HEX = '000004000000A702043F02D80085A3'
+
+const UV_ON_NOTIFY_HEX = '000004000000A702044B02A88184D7'
+const UV_OFF_NOTIFY_HEX = '000004000000A702044A08A8808C90388CD041E991'
+
+const BUCKET_LIGHT_ON_NOTIFY_HEX = '000004000000A702048C0287817086'
+const BUCKET_LIGHT_OFF_NOTIFY_HEX = '000004000000A702048A028780473E'
+
+// Sleep timer (0x21b) countdown notifies: remaining seconds in tlv
+const SLEEP_TIMER_59S_NOTIFY_HEX = '000004000000A70204ED0386D03BB028' // ~1 h displayed
+const SLEEP_TIMER_299S_NOTIFY_HEX = '000004000000A70204F30486E0012BC8DA' // ~5 h displayed
+const SLEEP_TIMER_OFF_NOTIFY_HEX = '000004000000A70204EE0286C0AFE8'
+
+// Bucket emptied and reinstalled (panel / LG app "water" clear); 0x2b1=256, 0x2b2=0
+const BUCKET_EMPTIED_NOTIFY_HEX = '000004000000A702046706AC600100AC807407'
+
+const BUCKET_FULL_NOTIFY_HEX = '000004000000A70204EE02AC811E20' // 0x2b2=1
+
+function makeDevice() {
     const ha = new MockHAConnection()
     const thinq = new MockThinq2Device(DEVICE_ID, META)
     const dev = new DUT(ha.asConnection(), thinq, META)
-    ha.on('setProperty', (_id: string, prop: string, value: string) => dev.setProperty(prop, value))
-    thinq.resetRecorder() // discard the queryCaps packet the constructor sent
+    ha.on('setProperty', (id: string, prop: string, value: string) => {
+        dev.setProperty(prop, value)
+    })
     return { ha, thinq, dev }
 }
 
-/** TLVs of a packet the handler put on the wire (header [1,1,2,1,1] + TLV body + CRC). */
-function sentTLVs(pkt: Buffer): Record<number, number> {
-    const out: Record<number, number> = {}
-    for (const { t, v } of TLV.parse(pkt.subarray(11, pkt.length - 2))) out[t] = v
-    return out
+function buildReadyDevice(t: import('node:test').TestContext) {
+    enableMockTimers(t)
+    const { ha, thinq, dev } = makeDevice()
+
+    thinq.resetRecorder()
+
+    thinq.emit('data', buf(CAPS_RESPONSE_HEX))
+    thinq.emit('data', buf(QUERY_RESPONSE_HEX))
+    tickMockTimers(t, 6000)
+
+    thinq.resetRecorder()
+    return { ha, thinq, dev }
 }
 
 describe(MODEL_ID, () => {
-    test('config exposes the humidifier + auxiliary components', (t) => {
-        const { ha, dev } = build(t)
-        const cfg = ha.devices[DEVICE_ID].config! as Record<string, unknown>
-        // HA device-based discovery rejects a top-level `name`; it must live in device.name.
-        assert.equal(cfg.name, undefined, 'no top-level name key')
-        assert.equal((cfg.device as { name?: string }).name, 'LG Dehumidifier')
-        const c = ha.devices[DEVICE_ID].config!.components as Record<string, Record<string, unknown>>
-
-        assert.equal(c.humidifier.platform, 'humidifier')
-        assert.equal(c.humidifier.device_class, 'dehumidifier')
-        assert.equal(c.humidifier.min_humidity, 40)
-        assert.equal(c.humidifier.max_humidity, 70)
-        assert.deepEqual(c.humidifier.modes, ['smart', 'jet', 'silent', 'spot', 'laundry'])
-        // humidifier attribute topics wired up by addField
-        assert.ok(c.humidifier.command_topic, 'power command topic')
-        assert.ok(c.humidifier.target_humidity_command_topic, 'target humidity command topic')
-        assert.ok(c.humidifier.current_humidity_topic, 'current humidity topic')
-        assert.ok(c.humidifier.mode_command_topic, 'mode command topic')
-
-        assert.equal(c.fan.platform, 'select')
-        assert.deepEqual(c.fan.options, ['low', 'high'])
-        assert.equal(c.temperature.platform, 'sensor')
-        assert.equal(c.temperature.device_class, 'temperature')
-        assert.equal(c.stoptimer.platform, 'number')
-        assert.equal(c.light.platform, 'switch')
-        assert.equal(c.uvnano.platform, 'switch')
-        assert.equal(c.error.platform, 'sensor')
-
-        dev.drop()
-    })
-
-    test('0xA7 async frames decode and publish state', (t) => {
-        const { ha, thinq, dev } = build(t)
-        // F_FANTABLE_HIGH also reports mode=spot, so apply F_MODE_SMART after it.
-        for (const f of [F_POWER_ON, F_FANTABLE_HIGH, F_MODE_SMART, F_TARGET_50, F_HUMIDITY_52, F_TEMP_58]) {
-            thinq.emit('data', buf(f))
-        }
-        const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p['humidifier-'], 'ON') // power
-        assert.equal(p['humidifier-mode'], 'smart')
-        assert.equal(p['humidifier-target_humidity'], 50)
-        assert.equal(p['humidifier-current_humidity'], 52)
-        assert.equal(p['temperature-'], 29) // 58 / 2
-        assert.equal(p['fan-'], 'high') // 0x1fa = 6
-
-        dev.drop()
-    })
-
-    test('a fan change is reported on 0x1fa within the resent mode table', (t) => {
-        const { ha, thinq, dev } = build(t)
-        thinq.emit('data', buf(F_FANTABLE_LOW)) // carries 0x1fa = 2
-        assert.equal(ha.devices[DEVICE_ID].properties['fan-'], 'low')
-
-        dev.drop()
-    })
-
-    /*
-     * The target-humidity entity had a state topic, a command topic and a working read, and every
-     * one of those was covered here - but nothing checked that a write left the handler, and it did
-     * not: the field has no write_xform, which used to make the base drop the write in silence.
-     * Verified against the physical dehumidifier, which answered a 0x253 = 55 write with
-     * airState.humidity.desired = 55.
-     */
-    test('setting the target humidity actually reaches the wire', (t) => {
-        const { thinq, dev } = build(t)
-        thinq.emit('data', buf(F_FANTABLE_HIGH)) // seed fan (0x1fa)
-        thinq.emit('data', buf(F_MODE_SMART)) // seed mode (0x1f9)
-        thinq.emit('data', buf(F_POWER_ON))
+    test('caps and values responses triggers humidifier config publish', (t) => {
+        enableMockTimers(t)
+        const { ha, thinq } = makeDevice()
         thinq.resetRecorder()
 
-        dev.setProperty('humidifier-target_humidity', '55')
+        thinq.emit('data', buf(CAPS_RESPONSE_HEX))
+        thinq.emit('data', buf(QUERY_RESPONSE_HEX))
 
-        assert.equal(thinq.outbox.length, 1, 'one write frame')
-        const tlv = sentTLVs(thinq.outbox[0])
-        assert.equal(tlv[0x253], 55, 'target humidity on the wire')
-        assert.equal(tlv[0x1f9], 17, 'mode attached')
-        assert.equal(tlv[0x1fa], 6, 'fan attached')
+        tickMockTimers(t, 6000)
+        const device = ha.devices[DEVICE_ID]
+        assert.ok(device, 'HA configuration published')
 
-        dev.drop()
+        const components = device.config!.components as Record<string, Record<string, unknown>>
+        assert.ok(components.humidifier, 'humidifier component')
+        assert.equal(components.humidifier.device_class, 'dehumidifier')
+        assert.deepEqual(components.humidifier.modes, ['Smart', 'Jet', 'Silent', 'Spot', 'Laundry'])
+        assert.ok(components.fan_speed, 'fan_speed select')
+        assert.deepEqual(components.fan_speed.options, ['low', 'high'])
+        assert.ok(components.off_timer, 'sleep timer number')
+        assert.equal(components.off_timer.name, 'Sleep timer')
+        assert.equal(components.off_timer.platform, 'number')
+        assert.equal(components.off_timer.device_class, 'duration')
+        assert.equal(components.off_timer.unit_of_measurement, 'h')
+        assert.equal(components.off_timer.mode, 'slider')
+        assert.equal(components.off_timer.min, 0)
+        assert.equal(components.off_timer.max, 9)
+        assert.equal(components.off_timer.step, 1)
+        assert.ok(components.ionizer, 'ionizer switch')
+        assert.ok(components.uv_nano, 'uv_nano switch')
+        assert.ok(components.bucket_light, 'bucket_light switch')
+        assert.equal(components.bucket_full.device_class, 'problem')
+        assert.equal(components.bucket_full.state_topic, '$this/bucket_full-')
+        assert.equal(components.current_humidity.platform, 'sensor')
+        assert.equal(components.current_humidity.device_class, 'humidity')
+        assert.ok('target_humidity_state_topic' in components.humidifier, 'has target humidity topics')
+        assert.equal(components.humidifier.current_humidity_topic, '$this/humidifier-current_humidity')
+        assert.equal(components.current_humidity.state_topic, '$this/humidifier-current_humidity')
     })
 
-    test('selecting a mode from off turns the unit on in one frame', (t) => {
-        const { thinq, dev } = build(t)
-        // seed fan (0x1fa) + target (0x253) so the attached tags carry real values
-        thinq.emit('data', buf(F_FANTABLE_HIGH))
-        thinq.emit('data', buf(F_TARGET_50))
-        thinq.emit('data', buf(F_POWER_OFF))
-        thinq.resetRecorder()
+    test('values packet publishes target humidity from tlv 0x253', (t) => {
+        const { ha } = buildReadyDevice(t)
 
-        dev.setProperty('humidifier-mode', 'jet')
-
-        assert.equal(thinq.outbox.length, 1, 'one write frame')
-        const tlv = sentTLVs(thinq.outbox[0])
-        assert.equal(tlv[0x1f9], 18, 'mode = jet')
-        assert.equal(tlv[0x1f7], 1, 'power forced on in the same frame')
-
-        dev.drop()
+        const props = ha.devices[DEVICE_ID]!.properties
+        assert.equal(props['humidifier-target_humidity'], 35)
+        assert.equal(props['ionizer-'], 'ON')
+        assert.equal(props['uv_nano-'], 'OFF')
+        assert.equal(props['fan_speed-'], 'low')
     })
 
-    test('power write maps ON/OFF to 0x1f7', (t) => {
-        const { thinq, dev } = build(t)
-        thinq.emit('data', buf(F_POWER_OFF))
-        thinq.resetRecorder()
+    test('current humidity publishes from tlv 0x336 (airState.humidity.current)', (t) => {
+        const { ha, thinq, dev } = buildReadyDevice(t)
 
-        dev.setProperty('humidifier-', 'ON')
-        assert.equal(sentTLVs(thinq.outbox[0])[0x1f7], 1)
+        thinq.emit('data', buf(CURRENT_HUMIDITY_48_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['humidifier-current_humidity'], 48)
 
-        thinq.resetRecorder()
-        dev.setProperty('humidifier-', 'OFF')
-        assert.equal(sentTLVs(thinq.outbox[0])[0x1f7], 0)
-
-        dev.drop()
+        dev.processKeyValue(0x336, 52)
+        assert.equal(ha.devices[DEVICE_ID]!.properties['humidifier-current_humidity'], 52)
     })
 
-    test('light and uvnano switches map to their tags', (t) => {
-        const { thinq, dev } = build(t)
-        dev.setProperty('light-', 'ON')
-        assert.equal(sentTLVs(thinq.outbox[0])[0x21e], 1)
-        thinq.resetRecorder()
-        dev.setProperty('uvnano-', 'ON')
-        assert.equal(sentTLVs(thinq.outbox[0])[0x2a2], 1)
+    test('uv on/off notify uses tlv 0x2a2', (t) => {
+        const { ha, thinq } = buildReadyDevice(t)
 
-        dev.drop()
+        thinq.emit('data', buf(UV_ON_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['uv_nano-'], 'ON')
+
+        thinq.emit('data', buf(UV_OFF_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['uv_nano-'], 'OFF')
+    })
+
+    test('ionizer off notify uses tlv 0x360', (t) => {
+        const { ha, thinq } = buildReadyDevice(t)
+
+        thinq.emit('data', buf(IONIZER_OFF_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['ionizer-'], 'OFF')
+    })
+
+    test('bucket full uses 0x2b2 steady state; 0x2b1=256 clears; humidity does not affect bucket', (t) => {
+        const { ha, thinq, dev } = buildReadyDevice(t)
+
+        dev.processKeyValue(0x2b2, 1)
+        assert.equal(ha.devices[DEVICE_ID]!.properties['bucket_full-'], 'ON')
+
+        dev.processKeyValue(0x336, 50)
+        assert.equal(ha.devices[DEVICE_ID]!.properties['bucket_full-'], 'ON', 'humidity tag must not toggle bucket')
+        assert.equal(ha.devices[DEVICE_ID]!.properties['humidifier-current_humidity'], 50)
+
+        thinq.emit('data', buf(BUCKET_EMPTIED_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['bucket_full-'], 'OFF')
+
+        thinq.emit('data', buf(BUCKET_FULL_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['bucket_full-'], 'ON')
+    })
+
+    test('bucket light on/off notify uses tlv 0x21e', (t) => {
+        const { ha, thinq } = buildReadyDevice(t)
+
+        thinq.emit('data', buf(BUCKET_LIGHT_ON_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['bucket_light-'], 'ON')
+
+        thinq.emit('data', buf(BUCKET_LIGHT_OFF_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['bucket_light-'], 'OFF')
+    })
+
+    test('target humidity write uses tlv 0x253', (t) => {
+        const { thinq, dev } = buildReadyDevice(t)
+
+        dev.setProperty('humidifier-target_humidity', '45')
+        const pkt = hex(thinq.outbox[thinq.outbox.length - 1])
+        assert.ok(pkt.includes('94D02D'), 'target humidity 45 encoded as tlv 0x253')
+    })
+
+    test('ionizer toggle write uses tlv 0x360', (t) => {
+        const { thinq, dev } = buildReadyDevice(t)
+
+        dev.setProperty('ionizer-', 'ON')
+        const pkt = hex(thinq.outbox[thinq.outbox.length - 1])
+        assert.ok(pkt.includes('D801'), 'ionizer tlv 0x360=1 present')
+        assert.ok(pkt.includes('7DC1'), 'power+mode attached to ionizer write')
+    })
+
+    test('uv_nano toggle write uses tlv 0x2a2', (t) => {
+        const { thinq, dev } = buildReadyDevice(t)
+
+        dev.setProperty('uv_nano-', 'ON')
+        const pkt = hex(thinq.outbox[thinq.outbox.length - 1])
+        assert.ok(pkt.includes('A881'), 'uv_nano tlv 0x2a2=1 present')
+        assert.ok(pkt.includes('7DC1'), 'power+mode attached to uv write')
+    })
+
+    test('bucket light write uses tlv 0x21e only', (t) => {
+        const { thinq, dev } = buildReadyDevice(t)
+
+        dev.setProperty('bucket_light-', 'ON')
+        const pkt = hex(thinq.outbox[thinq.outbox.length - 1])
+        assert.ok(pkt.includes('8781'), 'bucket light tlv 0x21e=1')
+        assert.ok(!pkt.includes('7DC1'), 'panel-style write has no power/mode attach')
+    })
+
+    test('fan_speed write sends MODE_FAN_CAPS table; laundry fixed high; caps not in raw state', (t) => {
+        const { thinq, dev } = buildReadyDevice(t)
+
+        // --- low: modes take fan=2 except Laundry (21) which stays 6 ---
+        dev.setProperty('fan_speed-', 'low')
+        assert.equal(thinq.outbox.length, 1, 'one fan-speed write packet')
+        const lowTlvs = parseSentTlvs(thinq.outbox[0])
+        assert.deepEqual(lowTlvs, expectedFanSpeedTlvs(2))
+
+        // Capability tags are not global state (would clobber to last row only if stored).
+        assert.equal(dev.raw_clip_state[0x1fa], 2, 'fan setpoint stored')
+        assert.equal(dev.raw_clip_state[0x2d7], undefined, 'mode id not stored as state')
+        assert.equal(dev.raw_clip_state[0x2d8], undefined, 'mode-fan padding not stored as state')
+        assert.equal(dev.raw_clip_state[0x2d9], undefined, 'per-mode fan not stored as state')
+
+        // Laundry row must be high even when requested fan is low
+        const laundryLow = lowTlvs.findIndex((x, i) => x.t === 0x2d7 && x.v === 21 && lowTlvs[i + 2]?.t === 0x2d9)
+        assert.ok(laundryLow >= 0, 'Laundry mode row present')
+        assert.equal(lowTlvs[laundryLow + 2].v, 6, 'Laundry fan always high')
+
+        // --- high: every mode row uses fan=6 ---
+        thinq.resetRecorder()
+        dev.setProperty('fan_speed-', 'high')
+        const highTlvs = parseSentTlvs(thinq.outbox[0])
+        assert.deepEqual(highTlvs, expectedFanSpeedTlvs(6))
+        assert.equal(dev.raw_clip_state[0x1fa], 6)
+        assert.equal(dev.raw_clip_state[0x2d7], undefined)
+
+        // Inbound capability table on notify must also not pollute raw_clip_state
+        dev.processKeyValue(0x2d7, 17)
+        dev.processKeyValue(0x2d8, 0)
+        dev.processKeyValue(0x2d9, 2)
+        assert.equal(dev.raw_clip_state[0x2d7], undefined)
+        assert.equal(dev.raw_clip_state[0x2d9], undefined)
+    })
+
+    test('sleep timer countdown notify uses tlv 0x21b seconds', (t) => {
+        const { ha, thinq } = buildReadyDevice(t)
+
+        thinq.emit('data', buf(SLEEP_TIMER_59S_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['off_timer-'], 1)
+
+        thinq.emit('data', buf(SLEEP_TIMER_299S_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['off_timer-'], 5)
+
+        thinq.emit('data', buf(SLEEP_TIMER_OFF_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['off_timer-'], 0)
+    })
+
+    test('sleep timer setpoint read uses minutes in tlv 0x21b', (t) => {
+        const { ha, dev } = buildReadyDevice(t)
+
+        dev.processKeyValue(0x21b, 540)
+        assert.equal(ha.devices[DEVICE_ID]!.properties['off_timer-'], 9)
+
+        dev.processKeyValue(0x21b, 180)
+        assert.equal(ha.devices[DEVICE_ID]!.properties['off_timer-'], 3)
+    })
+
+    test('sleep timer write encodes whole hours as minutes in tlv 0x21b', (t) => {
+        const { thinq, dev } = buildReadyDevice(t)
+
+        dev.setProperty('off_timer-', '9')
+        let pkt = hex(thinq.outbox[thinq.outbox.length - 1])
+        assert.ok(pkt.includes('86E0021C'), '9 h → 0x21b=540')
+
+        dev.setProperty('off_timer-', '5')
+        pkt = hex(thinq.outbox[thinq.outbox.length - 1])
+        assert.ok(pkt.includes('86E0012C'), '5 h → 0x21b=300')
+
+        dev.setProperty('off_timer-', '2')
+        pkt = hex(thinq.outbox[thinq.outbox.length - 1])
+        assert.ok(pkt.includes('86D078'), '2 h → 0x21b=120')
+
+        thinq.resetRecorder()
+        dev.setProperty('off_timer-', '1')
+        pkt = hex(thinq.outbox[thinq.outbox.length - 1])
+        assert.ok(pkt.includes('86D03C'), '1 h → 0x21b=60')
+
+        thinq.resetRecorder()
+        dev.setProperty('off_timer-', '0')
+        pkt = hex(thinq.outbox[thinq.outbox.length - 1])
+        assert.ok(pkt.includes('86C0'), '0 h → 0x21b=0')
+    })
+
+    test('entering silent mode defaults fan_speed to low; high still allowed', (t) => {
+        const { ha, thinq, dev } = buildReadyDevice(t)
+
+        dev.modeClipPrev = 17 // was smart
+        dev.processKeyValue(0x1f9, 19) // silent
+        assert.equal(ha.devices[DEVICE_ID]!.properties['fan_speed-'], 'low')
+
+        dev.processKeyValue(0x1fa, 6)
+        assert.equal(ha.devices[DEVICE_ID]!.properties['fan_speed-'], 'high')
+
+        thinq.resetRecorder()
+        dev.setProperty('fan_speed-', 'high')
+        assert.ok(thinq.outbox.length >= 1, 'high fan write allowed in silent mode')
     })
 })
