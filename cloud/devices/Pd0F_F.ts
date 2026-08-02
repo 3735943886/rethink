@@ -5,6 +5,14 @@ import { type Metadata } from '../thinq'
 import { allowExtendedType } from '@/util/casting'
 import AABBDevice from './aabb_device'
 import { currentRecord } from './monitoring_record'
+import {
+    CONTROL_PAUSE,
+    CONTROL_POWER_OFF,
+    CourseSelection,
+    codeOf,
+    courseControl,
+    shortControl,
+} from './monitoring_command'
 
 // LG "2nd Mini Washer" - the pedestal drawer washer sold in Korea, matched on modelId "Pd0F_F",
 // deviceType 201. AABB frames start with 0x20 and carry a 25-byte monitoring record (see
@@ -46,9 +54,12 @@ const OPT2_OFFSET = 15
 const OPT2_STERILIZE = 0x02
 const OPT2_WARM_WATER = 0x10
 const OPT3_OFFSET = 16
-const OPT3_REMOTE_START = 0x04 // 0x01 initialBit, 0x02 wifiSDS: protocol bookkeeping, not settings
+const OPT3_REMOTE_START = 0x04 // 0x02 wifiSDS: protocol bookkeeping, not a setting
+// Bookkeeping in a record, but the difference between starting a cycle and resuming one in a command.
+const OPT3_INITIAL_BIT = 0x01
 
 const STATE_OFF = 0
+const STATE_PAUSED = 2
 
 const STATE: Record<number, string> = {
     0: 'Off',
@@ -87,6 +98,63 @@ const COURSE: Record<number, string> = {
     15: 'Cotton 20',
 }
 
+/*
+ * What each of the seven dial courses runs with: [soil, spin, temperature, rinses, water level, water
+ * flow, soak]. A start command carries the whole cycle rather than just a course code, and these are
+ * the defaults the drawer's own panel fills in, from the model JSON. The last three are zero on every
+ * course - this washer has no such controls - and are kept so the layout reads as the appliance
+ * describes it.
+ *
+ * Confirmed on the wire: the app's Small Load start was 01 00 01 00 02 ... 05, matching row 1 field
+ * for field, with 0x05 as the initial and remote-start bits of the last option byte.
+ */
+const PRESET: Record<number, [number, number, number, number, number, number, number]> = {
+    1: [0, 1, 0, 2, 0, 0, 0], // Small Load
+    2: [0, 1, 40, 3, 0, 0, 0], // Underwear
+    3: [0, 1, 0, 2, 0, 0, 0], // Wool
+    4: [0, 1, 90, 2, 0, 0, 0], // Light Boil
+    5: [0, 1, 60, 4, 0, 0, 0], // Baby Care
+    6: [0, 1, 0, 1, 0, 0, 0], // Rinse + Spin
+    7: [0, 1, 60, 1, 0, 0, 0], // Tub Clean
+}
+
+// The start command's own layout, 15 bytes: the settings in the order the model JSON lists them, then
+// the reserve time and the smart-course slot, then four option bytes of which only the last one has
+// ever been non-zero.
+const CMD_LEN = 15
+const CMD_COURSE = 0
+const CMD_SOIL = 1
+const CMD_SPIN = 2
+const CMD_TEMP = 3
+const CMD_RINSE = 4
+const CMD_WATER_LEVEL = 5
+const CMD_WATER_FLOW = 6
+const CMD_SOAK = 7
+const CMD_OPT3 = 14 // rec[16]'s bits
+
+// Resuming is the same frame with the initial bit cleared - recorded from the app's own Resume button,
+// which sent this payload with 0x04 in place of 0x05.
+export function startPayload(course: number, resume: boolean): Buffer | undefined {
+    const preset = PRESET[course]
+    if (!preset) return undefined
+
+    const [soil, spin, temp, rinse, waterLevel, waterFlow, soak] = preset
+    const payload = Buffer.alloc(CMD_LEN)
+    payload[CMD_COURSE] = course
+    payload[CMD_SOIL] = soil
+    payload[CMD_SPIN] = spin
+    payload[CMD_TEMP] = temp
+    payload[CMD_RINSE] = rinse
+    payload[CMD_WATER_LEVEL] = waterLevel
+    payload[CMD_WATER_FLOW] = waterFlow
+    payload[CMD_SOAK] = soak
+    payload[CMD_OPT3] = OPT3_REMOTE_START | (resume ? 0 : OPT3_INITIAL_BIT)
+    return payload
+}
+
+// What a Home Assistant select can offer: the courses this handler knows how to start.
+const SELECTABLE = Object.keys(PRESET).map((code) => COURSE[Number(code)])
+
 const ERROR: Record<number, string> = {
     0: 'OK',
     1: 'Water supply error (IE)',
@@ -119,6 +187,9 @@ const TEMP: Record<number, string> = {
 }
 
 export default class Device extends AABBDevice {
+    private readonly course = new CourseSelection()
+    private state = STATE_OFF
+
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
         this.setConfig(
@@ -147,6 +218,42 @@ export default class Device extends AABBDevice {
                         state_topic: '$this/course',
                         name: 'Course',
                         icon: 'mdi:pin-outline',
+                    },
+                    // Two entities for one idea, because the appliance keeps them apart: "Course" above
+                    // is where the dial sits, this is what Start will ask for. They agree until one is
+                    // changed here, and turning the dial brings them back together.
+                    course_select: {
+                        platform: 'select',
+                        unique_id: '$deviceid-course_select',
+                        state_topic: '$this/course_select',
+                        command_topic: '$this/course_select/set',
+                        name: 'Course selection',
+                        icon: 'mdi:playlist-check',
+                        options: SELECTABLE,
+                    },
+                    start: {
+                        platform: 'button',
+                        unique_id: '$deviceid-start',
+                        command_topic: '$this/start/set',
+                        payload_press: '',
+                        name: 'Start',
+                        icon: 'mdi:play-circle-outline',
+                    },
+                    pause: {
+                        platform: 'button',
+                        unique_id: '$deviceid-pause',
+                        command_topic: '$this/pause/set',
+                        payload_press: '',
+                        name: 'Pause',
+                        icon: 'mdi:pause-circle-outline',
+                    },
+                    power_off: {
+                        platform: 'button',
+                        unique_id: '$deviceid-power_off',
+                        command_topic: '$this/power_off/set',
+                        payload_press: '',
+                        name: 'Power off',
+                        icon: 'mdi:power',
                     },
                     remaining_time: {
                         platform: 'sensor',
@@ -272,6 +379,10 @@ export default class Device extends AABBDevice {
 
         const state = rec[STATE_OFFSET]
         const isOff = state === STATE_OFF
+        this.state = state
+
+        this.course.follow(rec[COURSE_OFFSET])
+        if (this.course.selected) this.publishProperty('course_select', COURSE[this.course.selected])
 
         this.publishProperty('power', isOff ? 'OFF' : 'ON')
         this.publishProperty('status', STATE[state] ?? 'Running')
@@ -307,5 +418,26 @@ export default class Device extends AABBDevice {
         // decoded too, but the model JSON gives each of them exactly one value ("none"), so there is
         // nothing to show - this drawer washer has no such controls. rec[11], rec[17] and rec[18] are
         // named by nobody and have only ever been observed as zero.
+    }
+
+    // The drawer only obeys any of this with Remote Start armed on its own panel, which is a deliberate
+    // piece of LG's design and not something a command can switch on. The remote_start sensor above
+    // says whether it is armed - and while the appliance is asleep with its Wi-Fi module off, nothing
+    // reaches it at all.
+    setProperty(prop: string, mqttValue: string) {
+        if (prop === 'course_select') {
+            const code = codeOf(COURSE, mqttValue)
+            if (code === undefined || !(code in PRESET)) return
+            this.course.select(code)
+            this.publishProperty('course_select', mqttValue)
+        }
+
+        if (prop === 'start') {
+            const payload = startPayload(this.course.selected, this.state === STATE_PAUSED)
+            if (payload) this.send(courseControl(payload))
+        }
+
+        if (prop === 'pause') this.send(shortControl(CONTROL_PAUSE))
+        if (prop === 'power_off') this.send(shortControl(CONTROL_POWER_OFF))
     }
 }

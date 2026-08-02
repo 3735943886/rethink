@@ -5,6 +5,14 @@ import { type Metadata } from '../thinq'
 import { allowExtendedType } from '@/util/casting'
 import AABBDevice from './aabb_device'
 import { currentRecord } from './monitoring_record'
+import {
+    CONTROL_PAUSE,
+    CONTROL_POWER_OFF,
+    CourseSelection,
+    codeOf,
+    courseControl,
+    shortControl,
+} from './monitoring_command'
 
 // LG front-load washer sold in Korea - matched on modelId "F24VDD" (an AI DD 24 kg drum washer),
 // deviceType 201. AABB frames start with 0x20 and are discriminated by the second byte:
@@ -57,7 +65,9 @@ const OPT2_DOOR_LOCK = 0x04
 const OPT2_ADD_LOAD = 0x40 // "Add Garment" - the door may be opened to throw in a forgotten sock
 const OPT2_TURBO_SHOT = 0x80
 // rec[16] carries only the cloud's initialBit (0x20) and the AI DD panel LED (0x40), neither of which
-// is a setting worth an entity.
+// is a setting worth an entity. The initialBit does matter in a command, where it is what separates
+// starting a cycle from resuming a paused one.
+const OPT3_INITIAL_BIT = 0x20
 // rec[17:19]: energy used by the running cycle, big-endian, in Wh. The cloud does not decode it for
 // this model, but the styler in the same protocol family publishes exactly these two bytes as
 // energyMonitoring, and the counter behaves the part: it climbs at ~26 Wh/min while the washer heats
@@ -73,6 +83,7 @@ const TUB_CLEAN_COUNT_OFFSET = 21
 const LOAD_LEVEL_OFFSET = 23
 
 const STATE_OFF = 0
+const STATE_PAUSED = 6
 
 // state and preState share this table (the model JSON gives both the same enum).
 const STATE: Record<number, string> = {
@@ -219,6 +230,74 @@ const TEMP: Record<number, string> = {
     5: '95 °C',
 }
 
+/*
+ * What each dial course runs with: [operating course, soil, spin, temperature, rinses, steam,
+ * TurboShot]. A start command carries the whole cycle, not just a course code, and these are the
+ * values the appliance's own panel would fill in - taken from the model JSON's per-course defaults.
+ *
+ * Three of them are confirmed on the wire, from starts the ThinQ app was recorded making: Colour Care
+ * (0a 02 02 02 03 ... 10), Heavy Duty (06 03 03 04 03 ... 0e) and Steam Refresh (01 02 00 00 00 ...
+ * 01, with the steam bit set) match these rows byte for byte, including the operating course in the
+ * last field - which is a second table's worth of codes and the part most likely to be wrong.
+ *
+ * The options a course fixes cannot be overridden here: the machine ignores steam on a course with no
+ * steam step, and the app itself only offers what the course allows. Downloaded courses (dial code 14)
+ * are left out - starting one means first sending the course data into the appliance's slot.
+ */
+const PRESET: Record<number, [number, number, number, number, number, boolean, boolean]> = {
+    1: [1, 2, 0, 0, 0, true, false], // Steam Refresh
+    2: [2, 2, 3, 0, 4, true, false], // Allergy Care
+    3: [3, 2, 1, 0, 3, true, false], // Functional Wear
+    4: [13, 2, 3, 5, 3, false, false], // Economy Boil
+    5: [11, 2, 3, 0, 4, true, false], // Baby Wear
+    6: [14, 3, 3, 4, 3, false, false], // Heavy Duty
+    7: [5, 2, 4, 3, 2, false, true], // Cotton
+    8: [4, 2, 3, 0, 1, true, true], // Speed Wash
+    9: [7, 2, 2, 3, 4, false, false], // Quiet
+    10: [16, 2, 2, 2, 3, false, false], // Colour Care
+    11: [9, 2, 3, 1, 4, false, false], // Duvet
+    12: [8, 2, 2, 1, 3, false, false], // Lingerie / Wool
+    13: [17, 0, 3, 0, 1, false, false], // Rinse + Spin
+    15: [10, 2, 3, 4, 2, false, false], // Tub Clean
+}
+
+// The start command's own layout. Its first fields are the settings in the order the model JSON lists
+// them, then the three option bytes carrying the record's own bit masks, then the course to run and
+// the smart course. The remaining nine bytes are padding to the declared length of 21.
+const CMD_LEN = 21
+const CMD_COURSE = 0
+const CMD_SOIL = 1
+const CMD_SPIN = 2
+const CMD_TEMP = 3
+const CMD_RINSE = 4
+const CMD_FLAGS = 7 // rec[14]'s bits
+const CMD_OPT2 = 8 // rec[15]'s
+const CMD_OPT3 = 9 // rec[16]'s
+const CMD_OP_COURSE = 10
+
+// What a Home Assistant select can offer: the courses this handler knows how to start.
+const SELECTABLE = Object.keys(PRESET).map((code) => COURSE[Number(code)])
+
+// Resuming is the same frame with the initial bit cleared - the appliance reads it as "carry on with
+// what you were doing" and ignores the settings, which is why a resume needs no state of its own.
+export function startPayload(course: number, resume: boolean): Buffer | undefined {
+    const preset = PRESET[course]
+    if (!preset) return undefined
+
+    const [opCourse, soil, spin, temp, rinse, steam, turboShot] = preset
+    const payload = Buffer.alloc(CMD_LEN)
+    payload[CMD_COURSE] = course
+    payload[CMD_SOIL] = soil
+    payload[CMD_SPIN] = spin
+    payload[CMD_TEMP] = temp
+    payload[CMD_RINSE] = rinse
+    payload[CMD_FLAGS] = FLAG_REMOTE_START | (steam ? FLAG_STEAM : 0)
+    payload[CMD_OPT2] = turboShot ? OPT2_TURBO_SHOT : 0
+    payload[CMD_OPT3] = resume ? 0 : OPT3_INITIAL_BIT
+    payload[CMD_OP_COURSE] = opCourse
+    return payload
+}
+
 const ERROR: Record<number, string> = {
     0: 'OK',
     1: 'Door lock error (DE2)',
@@ -243,6 +322,9 @@ const ERROR: Record<number, string> = {
 }
 
 export default class Device extends AABBDevice {
+    private readonly course = new CourseSelection()
+    private state = STATE_OFF
+
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
         this.setConfig(
@@ -271,6 +353,42 @@ export default class Device extends AABBDevice {
                         state_topic: '$this/course',
                         name: 'Course',
                         icon: 'mdi:pin-outline',
+                    },
+                    // Two entities for one idea, because the appliance keeps them apart: "Course" above
+                    // is where the dial sits, this is what Start will ask for. They agree until one is
+                    // changed here, and turning the dial brings them back together.
+                    course_select: {
+                        platform: 'select',
+                        unique_id: '$deviceid-course_select',
+                        state_topic: '$this/course_select',
+                        command_topic: '$this/course_select/set',
+                        name: 'Course selection',
+                        icon: 'mdi:playlist-check',
+                        options: SELECTABLE,
+                    },
+                    start: {
+                        platform: 'button',
+                        unique_id: '$deviceid-start',
+                        command_topic: '$this/start/set',
+                        payload_press: '',
+                        name: 'Start',
+                        icon: 'mdi:play-circle-outline',
+                    },
+                    pause: {
+                        platform: 'button',
+                        unique_id: '$deviceid-pause',
+                        command_topic: '$this/pause/set',
+                        payload_press: '',
+                        name: 'Pause',
+                        icon: 'mdi:pause-circle-outline',
+                    },
+                    power_off: {
+                        platform: 'button',
+                        unique_id: '$deviceid-power_off',
+                        command_topic: '$this/power_off/set',
+                        payload_press: '',
+                        name: 'Power off',
+                        icon: 'mdi:power',
                     },
                     op_course: {
                         platform: 'sensor',
@@ -482,6 +600,10 @@ export default class Device extends AABBDevice {
 
         const state = rec[STATE_OFFSET]
         const isOff = state === STATE_OFF
+        this.state = state
+
+        this.course.follow(rec[COURSE_OFFSET])
+        if (this.course.selected) this.publishProperty('course_select', COURSE[this.course.selected])
 
         this.publishProperty('power', isOff ? 'OFF' : 'ON')
         this.publishProperty('status', STATE[state] ?? 'Running')
@@ -526,5 +648,26 @@ export default class Device extends AABBDevice {
         // and laundryTexture (rec[27]), for which the model JSON offers no value table at all. Nothing
         // names rec[25], rec[26] or rec[28:34] - the tail is constant across every record this washer
         // has sent.
+    }
+
+    // The appliance only obeys any of this with Remote Start armed on its own panel, which is a
+    // deliberate piece of LG's design and not something a command can switch on: a washer that could
+    // be started from the internet with the door open would be a different appliance. The remote_start
+    // sensor above says whether it is armed.
+    setProperty(prop: string, mqttValue: string) {
+        if (prop === 'course_select') {
+            const code = codeOf(COURSE, mqttValue)
+            if (code === undefined || !(code in PRESET)) return
+            this.course.select(code)
+            this.publishProperty('course_select', mqttValue)
+        }
+
+        if (prop === 'start') {
+            const payload = startPayload(this.course.selected, this.state === STATE_PAUSED)
+            if (payload) this.send(courseControl(payload))
+        }
+
+        if (prop === 'pause') this.send(shortControl(CONTROL_PAUSE))
+        if (prop === 'power_off') this.send(shortControl(CONTROL_POWER_OFF))
     }
 }

@@ -5,6 +5,14 @@ import { type Metadata } from '../thinq'
 import { allowExtendedType } from '@/util/casting'
 import AABBDevice from './aabb_device'
 import { currentRecord } from './monitoring_record'
+import {
+    CONTROL_PAUSE,
+    CONTROL_POWER_OFF,
+    CourseSelection,
+    codeOf,
+    courseControl,
+    shortControl,
+} from './monitoring_command'
 
 // LG Styler (steam clothing care cabinet) sold in Korea - matched on modelId "S3BF_POD_DN4", nameplate
 // "Essence_ESL", deviceType 203. AABB frames start with 0x31 and carry a 28-byte monitoring record
@@ -43,7 +51,10 @@ const RESERVE_MIN_OFFSET = 13
 const FLAGS_OFFSET = 14
 const FLAG_CHILD_LOCK = 0x01
 const FLAG_NIGHT_DRY = 0x02
-const FLAG_REMOTE_START = 0x08 // 0x04 is the cloud's initialBit, protocol bookkeeping, not a setting
+const FLAG_REMOTE_START = 0x08
+// The cloud's initialBit: bookkeeping in a record, but the difference between starting a course and
+// resuming a paused one in a command.
+const FLAG_INITIAL_BIT = 0x04
 // rec[17:19]: energy used by the running cycle, big-endian, in Wh (the cloud publishes it as
 // energyMonitoring). It holds the last cycle's total while the appliance is idle.
 const ENERGY_OFFSET = 17
@@ -53,6 +64,7 @@ const SMART_COURSE_OFFSET = 20
 const DOWNLOAD_COURSE_OFFSET = 24
 
 const STATE_OFF = 0
+const STATE_PAUSED = 3
 
 // State codes, every one of them named by stepping rec[0] through 0..127 and reading the cloud's
 // decode back. The model JSON's Value.State is a name->label dict with no index, and its key order is
@@ -184,7 +196,90 @@ const SMART_COURSE: Record<number, string> = {
     102: 'Silk care',
 }
 
+/*
+ * Starting a course on this appliance is not a matter of naming it. Unlike the washers of the same
+ * family, whose start command carries a course code and a handful of settings, the styler is handed
+ * the entire recipe: twelve phases - pre-steam, pre-heat, steam, stay, cooling and drying, twice over -
+ * each with a duration, a moisture-heater RPM and a fan RPM. The cabinet runs what it is told, and the
+ * course code beside it is a label.
+ *
+ * These are those recipes, the 36 parameter bytes per course, from the model JSON's own per-course
+ * defaults. The layout is not a guess: the one start the ThinQ app was recorded making - Fine Dust,
+ * code 30 - rebuilds from this table byte for byte, all 46 of them, which pins the phase order, the
+ * triplet structure and the two odd corners of the frame (the 0x80 on the first duration and the unused
+ * trailing byte) at once.
+ *
+ * Only courses the model marks controlEnable are here; the dial's other programs (the timed indoor
+ * dries, night care) are ones the app will not start remotely either.
+ */
+const RECIPE: Record<number, string> = {
+    1: '02000000000006000003b40001b4001bb400000000000000000000000000000000000000', // Standard
+    3: '02000000000003000000000001b4000eb400000000000000000000000000000000000000', // Quick
+    5: '02006900000006006905c86903c8002bb400000000000000000000000000000000000000', // Heavy
+    6: '020000000000040000000000010000147800000000000000000000000000000000000000', // Wool / Knitwear
+    7: '02000000000005000002b40001b40018b400000000000000000000000000000000000000', // Suits / Coats
+    8: '020000000000030000000000000000140000000000000000040000030000017800157800', // Sportswear
+    11: '0200002300000500000a00000300001c7800000000000000000000000000000000000000', // Sanitary Standard
+    12: '0200002300000500000a0000030000260000000000000000000000000000000000000000', // Bedding
+    15: '0000000000000000000000000000005a7800000000000000000000000000000000000000', // Drying (Normal)
+    22: '0200000000000300000000000100002d7800000000000000000000000000000000000000', // Rain / Snow
+    28: '000000000000000000000000000000f00000000000000000000000000000000000000000', // Padding Care
+    30: '02000000000000000000000005c80000000000000000000003000002c80001c80028c800', // Fine Dust
+    31: '0200002300000500000a00000300003a0000000000000000000000000000000000000000', // Virus Care
+    32: '0200002300000500000a00000300002b0000000000000000000000000000000000000000', // Jeans
+    33: '0000000000000000000000000000001e7800000000000000000000000000000000000000', // Fur / Leather
+    34: '020000000000020000000000017800057800000000000000000000000000000000000000', // Static Removal
+}
+
+// The start command's own layout, 46 bytes: the course and its two neighbours, the options byte with
+// the record's own bit masks, the reserve time, then the recipe. Bytes 4-6 have been zero in every
+// frame seen and are unaccounted for - the model JSON lists the four options as separate fields there,
+// which the packed byte at 3 says they are not.
+const CMD_LEN = 46
+const CMD_COURSE = 0
+const CMD_DOWNLOAD_SLOT = 1
+const CMD_SMART_COURSE = 2
+const CMD_FLAGS = 3 // rec[14]'s bits
+const CMD_RESERVE_HOUR = 7
+const CMD_RESERVE_MINUTE = 8
+const CMD_RECIPE = 9
+// The first duration carries an extra high bit. What it means is not known - it is set on both frames
+// this appliance was recorded being sent, a start and a course download, and it is the one byte that
+// does not fall out of the model JSON. It is reproduced rather than explained.
+const RECIPE_MARKER = 0x80
+
+export function startPayload(course: number): Buffer | undefined {
+    const recipe = RECIPE[course]
+    if (!recipe) return undefined
+
+    const payload = Buffer.alloc(CMD_LEN)
+    payload[CMD_COURSE] = course
+    payload[CMD_DOWNLOAD_SLOT] = 1
+    payload[CMD_SMART_COURSE] = 0
+    payload[CMD_FLAGS] = FLAG_INITIAL_BIT
+    payload[CMD_RESERVE_HOUR] = 0
+    payload[CMD_RESERVE_MINUTE] = 0
+    Buffer.from(recipe, 'hex').copy(payload, CMD_RECIPE)
+    payload[CMD_RECIPE] |= RECIPE_MARKER
+    return payload
+}
+
+// Resuming is a frame of its own: one byte shorter - the download slot is left out - and empty apart
+// from the course, since the cabinet already knows what it was in the middle of. The cleared initial
+// bit is what tells it to carry on rather than start again.
+export function resumePayload(course: number): Buffer {
+    const payload = Buffer.alloc(CMD_LEN - 1)
+    payload[CMD_COURSE] = course
+    return payload
+}
+
+// What a Home Assistant select can offer: the courses this handler knows how to start.
+const SELECTABLE = Object.keys(RECIPE).map((code) => COURSE[Number(code)])
+
 export default class Device extends AABBDevice {
+    private readonly course = new CourseSelection()
+    private state = STATE_OFF
+
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
         this.setConfig(
@@ -213,6 +308,43 @@ export default class Device extends AABBDevice {
                         state_topic: '$this/course',
                         name: 'Course',
                         icon: 'mdi:pin-outline',
+                    },
+                    // Two entities for one idea, because the appliance keeps them apart: "Course" above
+                    // is the program the cabinet has selected, this is what Start will ask for. They
+                    // agree until one is changed here, and the panel's own selection brings them back
+                    // together.
+                    course_select: {
+                        platform: 'select',
+                        unique_id: '$deviceid-course_select',
+                        state_topic: '$this/course_select',
+                        command_topic: '$this/course_select/set',
+                        name: 'Course selection',
+                        icon: 'mdi:playlist-check',
+                        options: SELECTABLE,
+                    },
+                    start: {
+                        platform: 'button',
+                        unique_id: '$deviceid-start',
+                        command_topic: '$this/start/set',
+                        payload_press: '',
+                        name: 'Start',
+                        icon: 'mdi:play-circle-outline',
+                    },
+                    pause: {
+                        platform: 'button',
+                        unique_id: '$deviceid-pause',
+                        command_topic: '$this/pause/set',
+                        payload_press: '',
+                        name: 'Pause',
+                        icon: 'mdi:pause-circle-outline',
+                    },
+                    power_off: {
+                        platform: 'button',
+                        unique_id: '$deviceid-power_off',
+                        command_topic: '$this/power_off/set',
+                        payload_press: '',
+                        name: 'Power off',
+                        icon: 'mdi:power',
                     },
                     smart_course: {
                         platform: 'sensor',
@@ -317,6 +449,10 @@ export default class Device extends AABBDevice {
 
         const state = rec[STATE_OFFSET]
         const isOff = state === STATE_OFF
+        this.state = state
+
+        this.course.follow(rec[COURSE_OFFSET])
+        if (this.course.selected) this.publishProperty('course_select', COURSE[this.course.selected])
 
         this.publishProperty('power', isOff ? 'OFF' : 'ON')
         this.publishProperty('status', STATE[state] ?? 'Running')
@@ -344,5 +480,26 @@ export default class Device extends AABBDevice {
         // this record either (buzzer, end melody, internal lighting, night-care start time, smart-care
         // toggles, tub-clean count) must ride in one of the frame types this model has not been seen
         // sending yet.
+    }
+
+    // The cabinet only obeys any of this with Remote Start armed on its own panel, which is a deliberate
+    // piece of LG's design and not something a command can switch on. The remote_start sensor above says
+    // whether it is armed.
+    setProperty(prop: string, mqttValue: string) {
+        if (prop === 'course_select') {
+            const code = codeOf(COURSE, mqttValue)
+            if (code === undefined || !(code in RECIPE)) return
+            this.course.select(code)
+            this.publishProperty('course_select', mqttValue)
+        }
+
+        if (prop === 'start') {
+            const payload =
+                this.state === STATE_PAUSED ? resumePayload(this.course.selected) : startPayload(this.course.selected)
+            if (payload) this.send(courseControl(payload))
+        }
+
+        if (prop === 'pause') this.send(shortControl(CONTROL_PAUSE))
+        if (prop === 'power_off') this.send(shortControl(CONTROL_POWER_OFF))
     }
 }
