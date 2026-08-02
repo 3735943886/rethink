@@ -146,6 +146,22 @@ export default class Device extends TLVDevice {
                     payload_off: 'OFF',
                     state_topic: '$this/bucket_full-',
                 },
+                temperature: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-temperature',
+                    name: 'Temperature',
+                    device_class: 'temperature',
+                    unit_of_measurement: '°C',
+                    state_class: 'measurement',
+                    suggested_display_precision: 0,
+                },
+                error: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-error',
+                    name: 'Error code',
+                    icon: 'mdi:alert',
+                    entity_category: 'diagnostic',
+                },
             },
         })
 
@@ -293,6 +309,30 @@ export default class Device extends TLVDevice {
 
         this.addTimerField(config, 0x21b, 'off_timer', 'Sleep timer', 'mdi:bed-clock', 9)
 
+        /*
+         * Room temperature, TLV 0x1fd, in half-degrees. Not shown in the ThinQ app, but the
+         * cloud labels it airState.tempState.current and it is genuinely a second quantity
+         * rather than a copy of the humidity: over two days of captures 0x1fd held 62/64/66/68
+         * (31-34 °C, drifting slowly) while 0x336 moved across 44-55 in the same frames. That
+         * is what settles the 0x336-vs-0x1fd question raised on the PR - they are different
+         * properties, and only 0x336 tracks what the app shows as humidity.
+         */
+        this.addField(config, {
+            id: 0x1fd,
+            name: '',
+            comp: 'temperature',
+            writable: false,
+            read_xform: (raw) => raw / 2,
+        })
+
+        /*
+         * Fault code, TLV 0x221 (airState.diagCode), 0 when healthy. The appliance has no
+         * tank-full property of its own in the cloud model, so a halt for a full bucket is one
+         * of the conditions that surfaces here - the 0x2b1/0x2b2 pair above is the other, more
+         * direct route, which our own unit has never emitted in two days of capture.
+         */
+        this.addField(config, { id: 0x221, name: '', comp: 'error', writable: false })
+
         // Wire bare state_topic/command_topic (expected by humidifier platform) to our 'power' property
         const hum = (config.components as any).humidifier
         hum.state_topic = '$this/humidifier-power'
@@ -395,6 +435,18 @@ export default class Device extends TLVDevice {
             return
         }
         super.processKeyValue(k, v)
+    }
+
+    /*
+     * This appliance marks its state frames 0xa7 at buf[6] rather than 0x87, the way the
+     * ceiling cassettes and the stand ACs do. Upstream PR #64 widened the test for every
+     * device at once; here it is the per-model hook that is widened instead, so a family that
+     * has only ever been seen sending 0x87 keeps rejecting anything else. The set is WIDENED,
+     * never replaced - buf[6] is not a per-device constant, and the private-channel command
+     * acknowledgements stay 0x87 on units whose async frames are 0xa7.
+     */
+    isHeaderByte6(byte: number): boolean {
+        return byte === 0x87 || byte === 0xa7
     }
 
     isCapsResponse(tlvArray: TLV.TLV[]) {

@@ -24,6 +24,15 @@ const CURRENT_HUMIDITY_48_NOTIFY_HEX = (() => {
         .toUpperCase()
 })()
 
+/** Wrap a TLV list in this appliance's 0xa7 notify envelope. */
+function notify(tlvs: TLV.TLV[]): string {
+    const tlv = TLV.build(tlvs)
+    const body = [0x04, 0x00, 0x00, 0x00, 0xa7, 0x02, 0x04, 0x00, tlv.length, ...tlv]
+    return Buffer.from([0x00, 0x00, ...body, 0x00, 0x00])
+        .toString('hex')
+        .toUpperCase()
+}
+
 function parseSentTlvs(packet: Buffer): TLV.TLV[] {
     // Same framing as TLVDevice.processData: TLV payload at offset 11, CRC last 2 bytes
     return TLV.parse(packet.subarray(11, packet.length - 2)).map(({ t, v }) => ({ t, v }))
@@ -147,6 +156,51 @@ describe(MODEL_ID, () => {
 
         dev.processKeyValue(0x336, 52)
         assert.equal(ha.devices[DEVICE_ID]!.properties['humidifier-current_humidity'], 52)
+    })
+
+    test('temperature publishes from tlv 0x1fd in half-degrees', (t) => {
+        const { ha, thinq } = buildReadyDevice(t)
+
+        // The four values our own unit reported over two days: 62/64/66/68 -> 31..34 °C.
+        for (const [raw, celsius] of [
+            [62, 31],
+            [64, 32],
+            [66, 33],
+            [68, 34],
+        ]) {
+            thinq.emit('data', buf(notify([{ t: 0x1fd, v: raw }])))
+            assert.equal(ha.devices[DEVICE_ID]!.properties['temperature-'], celsius)
+        }
+    })
+
+    test('temperature and current humidity are separate properties', (t) => {
+        const { ha, thinq } = buildReadyDevice(t)
+
+        // 0x1fd is not a second copy of the humidity: one frame carrying both must publish
+        // 33 °C and 48 %, not the same number twice.
+        thinq.emit(
+            'data',
+            buf(
+                notify([
+                    { t: 0x1fd, v: 66 },
+                    { t: 0x336, v: 48 },
+                ]),
+            ),
+        )
+
+        const props = ha.devices[DEVICE_ID]!.properties
+        assert.equal(props['temperature-'], 33)
+        assert.equal(props['humidifier-current_humidity'], 48)
+    })
+
+    test('error code publishes from tlv 0x221', (t) => {
+        const { ha, thinq } = buildReadyDevice(t)
+
+        thinq.emit('data', buf(notify([{ t: 0x221, v: 0 }])))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['error-'], 0)
+
+        thinq.emit('data', buf(notify([{ t: 0x221, v: 5 }])))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['error-'], 5)
     })
 
     test('uv on/off notify uses tlv 0x2a2', (t) => {
