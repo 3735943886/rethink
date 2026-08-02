@@ -15,6 +15,7 @@ import F_V__F___W_B_1QEUK from './devices/F_V__F___W.B_1QEUK'
 import F_VB_F___W_B_2QEUK from './devices/F_VB_F___W.B_2QEUK'
 import VCDWL2QEUK from './devices/VCDWL2QEUK'
 import CST_570004_WW from './devices/CST_570004_WW'
+import CST_170004_WW from './devices/CST_170004_WW'
 import T1789EFH_F from './devices/T1789EFH_F'
 import RV13U6AM8W_D_US_WIFI from './devices/RV13U6AM8W_D_US_WIFI'
 import F3L2CYU__ from './devices/F3L2CYU__'
@@ -35,6 +36,7 @@ import { type Connection } from './homeassistant'
 import HADevice from './devices/base'
 import { type Metadata } from './thinq'
 import { AnyDevice } from './devmgr'
+import type { ReservationStore } from '@/bridge/reservation-store'
 
 type T1Factory = new (HA: Connection, thinq: T1Device, metadata: Metadata) => HADevice
 type T2Factory = new (HA: Connection, thinq: T2Device, metadata: Metadata) => HADevice
@@ -48,6 +50,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     RAC_056905_WW,
     ['RAC_0B0001_WW']: RAC_056905_WW, // a different European variant (deviceType 401, RTK_RTL8720cm), same TLV handler
     CST_570004_WW, // LG ceiling-cassette IDU (multi-split, deviceType 401); RAC handler + 0xa7 header normalization
+    CST_170004_WW, // LG wall/built-in IDU (multi-split, deviceType 401); DualCool TLV via ac_common
     WIN_056905_WW,
     DHUM_056905_WW, // LG dehumidifier (deviceType 403); same TLV family, humidifier platform
     ['2REF11EIDA__4']: Dev_2REF11EIDA__4,
@@ -81,7 +84,15 @@ const t2deviceTypes: Record<string, T2Factory> = {
 
 class Bridge {
     haDevices = new Map<string, HADevice>()
-    constructor(readonly HA: Connection) {
+    /*
+     * The reservation store is optional: a driver that relays the LG app's on/off reservation
+     * simply runs it in memory when there is nowhere to persist deadlines to, which is what
+     * happens when the bridge is not configured at all.
+     */
+    constructor(
+        readonly HA: Connection,
+        readonly reservationStore?: ReservationStore,
+    ) {
         HA.on('discovery', () => {
             this.haDevices.forEach((ha) => ha.publishConfig())
         })
@@ -110,6 +121,14 @@ class Bridge {
             console.warn(`${thinqdev.platform} device type ${meta.modelId} unknown`)
             return
         }
+
+        /* Handed over before start(), which is where a relaying driver loads its deadlines. */
+        if (
+            this.reservationStore &&
+            'setReservationStore' in hadevice &&
+            typeof hadevice.setReservationStore === 'function'
+        )
+            hadevice.setReservationStore(this.reservationStore)
 
         this.haDevices.set(thinqdev.id, hadevice)
         thinqdev.on('close', () => this.dropDevice(hadevice))

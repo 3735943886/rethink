@@ -4,9 +4,11 @@ import { ClimateComponent, DeviceDiscovery, type Connection } from '../homeassis
 import { type Metadata } from '../thinq'
 import { allowExtendedType } from '@/util/casting'
 import * as TLV from '@/util/tlv'
+import crc16 from '@/util/crc16'
 import { racAirTemp, racPipeTemp } from '@/util/ac_tables'
 import log from '@/util/logging'
 import HADevice from './base'
+import type { ReservationDeadlines, ReservationStore } from '@/bridge/reservation-store'
 
 type PowerModeChangeHook = () => void
 type CheckMode = (arg: number) => boolean
@@ -74,8 +76,33 @@ const CAP_SWING_HORIZONTAL = 0x08 | 0x20
  * Home Assistant cannot see the effect of until it fires, and anyone automating a switch-on already
  * has a better way to do it. The sleep timer stays because it is a live countdown the unit acts on
  * by itself, which is worth reporting.
+ *
+ * A model that runs the pair here instead of on the appliance is a different case and says so with
+ * relayReservation: there the two entities are this driver's own countdown, not a schedule hidden
+ * inside the unit, so Home Assistant can see what they are doing.
  */
 const CAP_SLEEP_TIMER = 0x01
+
+/*
+ * The tags the cloud decodes its airState.reservation.* bundle from. Each mapping was
+ * established by feeding a distinct value upstream and reading back which key the cloud
+ * produced, so they are measurements rather than guesses:
+ *
+ *   0x21b -> targetTimeToStop      0x21c -> targetTimeToStart   (both in minutes)
+ *   0x145 -> relativeStartTime     0x146 -> relativeStopTime
+ *   0x17c -> banDisturbSleep       0x1de -> Cancel
+ *   0x3b5 -> stopHeatingTimer
+ *
+ * The LG app reads and writes the whole bundle at once, so a key it cannot resolve fails the
+ * call outright ("제품과의 연결 상태가 좋지 않아요"). See relayReservation.
+ */
+const TAG_RES_STOP = 0x21b
+const TAG_RES_START = 0x21c
+const TAG_RES_RELATIVE_START = 0x145
+const TAG_RES_RELATIVE_STOP = 0x146
+const TAG_RES_BAN_DISTURB_SLEEP = 0x17c
+const TAG_RES_CANCEL = 0x1de
+const TAG_RES_STOP_HEATING = 0x3b5
 
 /*
  * Test a capability bit. A unit that does not report the bitmap at all reads as having none of
@@ -246,6 +273,9 @@ export default abstract class ACDevice extends TLVDevice {
     powerStatePrev?: boolean
     modeChangeHooks: PowerModeChangeHook[] = []
     modePrev?: string
+    /* Symmetric with the two above, for anything derived from the fan speed. */
+    fanChangeHooks: PowerModeChangeHook[] = []
+    fanPrev?: string | number
     airClean: boolean = false
     jetMode: boolean = false
     energySave: boolean = false
@@ -256,6 +286,12 @@ export default abstract class ACDevice extends TLVDevice {
     filterChangedDate: number = 0
     filterInitialQueryTimeout: ReturnType<typeof setTimeout> | undefined
     filterQueryTimer: ReturnType<typeof setInterval> | undefined
+    /* --- reservation relay state; see relayReservation --- */
+    resDeadline: ReservationDeadlines = {}
+    resTimer: ReturnType<typeof setInterval> | undefined
+    resSeq: number = 0
+    resCloudWriteHook: ((buf: Buffer) => void) | undefined
+    resStore: ReservationStore | undefined
 
     /* --- per-model description of the protocol; see the class comment --- */
 
@@ -361,9 +397,66 @@ export default abstract class ACDevice extends TLVDevice {
      */
     readonly modeDependentSwitchOptimistic: boolean = false
 
+    /*
+     * Run the LG app's on/off reservation here instead of on the appliance.
+     *
+     * Two measured facts make this necessary on units of this family. The unit accepts a write to
+     * the two timer tags and acknowledges it, but never acts on it - a two-minute turn-on timer
+     * written straight to 0x21c never fired - and it never reports those tags back. Because the
+     * cloud builds its airState.reservation.* bundle from what the appliance reports, and the
+     * bridge's re-registration wipes the stored snapshot, those keys disappear for good and the
+     * app's reservation screen fails with "제품과의 연결 상태가 좋지 않아요".
+     *
+     * With this on, the driver reports the bundle upstream itself, picks up the timer the cloud
+     * writes, counts it down against the local clock and switches the unit at zero. Sleep timer
+     * (0x21a) is untouched: the appliance reports and runs that one on its own.
+     */
+    readonly relayReservation: boolean = false
+
+    /*
+     * Upper bound of the 취침예약 entities, in minutes. 15 h is what the wall-mounted units take;
+     * a model whose spec (or panel) says otherwise overrides it.
+     */
+    readonly sleepTimerMaxMinutes: number = 15 * 60
+
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
         this.meta = meta
+    }
+
+    setReservationStore(store: ReservationStore) {
+        this.resStore = store
+    }
+
+    start() {
+        super.start()
+
+        /* Subclass fields are only assigned once our constructor has returned, so the flag can
+         * not be read there. */
+        if (!this.relayReservation || this.resCloudWriteHook) return
+
+        this.resDeadline = this.resStore?.load(this.id) ?? {}
+        this.resCloudWriteHook = (buf: Buffer) => this.observeCloudWrite(buf)
+        this.thinq.on('sendData', this.resCloudWriteHook)
+
+        /* Turning the unit off by hand satisfies a pending off-reservation, and vice versa. */
+        this.powerChangeHooks.push(() => {
+            /*
+             * The hooks run before powerStatePrev is updated, so the state being entered is the
+             * one being reported now - and the very first report is a baseline rather than a
+             * transition, so nothing has been satisfied by it.
+             */
+            if (this.powerStatePrev == null) return
+            const satisfied = this.powerStatePrev ? 'stop' : 'start'
+            if (this.resDeadline[satisfied] != null) {
+                this.resDeadline[satisfied] = undefined
+                this.persistReservation()
+                this.publishReservation()
+            }
+        })
+
+        this.publishReservation()
+        this.resTimer = setInterval(() => this.reservationTick(), 60 * 1000)
     }
 
     drop() {
@@ -376,8 +469,115 @@ export default abstract class ACDevice extends TLVDevice {
         this.filterInitialQueryTimeout = undefined
         clearInterval(this.filterQueryTimer)
         this.filterQueryTimer = undefined
+        clearInterval(this.resTimer)
+        this.resTimer = undefined
+        if (this.resCloudWriteHook) {
+            this.thinq.removeListener('sendData', this.resCloudWriteHook)
+            this.resCloudWriteHook = undefined
+        }
 
         super.drop()
+    }
+
+    /*
+     * A reservation arrives as an ordinary TLV write of the timer tags, on the same channel as
+     * every other control, so it is picked up from what goes out to the appliance. HA writes to
+     * the two timer entities travel the same path and are picked up here too.
+     */
+    observeCloudWrite(buf: Buffer) {
+        if (buf.length < 13) return
+        if (buf[2] !== 0x04 || buf[3] !== 0x00 || buf[4] !== 0x00 || buf[5] !== 0x00) return
+        if (buf[6] !== 0x65 || buf[7] !== 0x02 || buf[8] !== 0x01) return
+
+        const length = buf[10]
+        if (11 + length > buf.length) return
+
+        for (const { t, v } of TLV.parse(buf.subarray(11, 11 + length))) {
+            if (t === TAG_RES_START) this.setReservation('start', v)
+            else if (t === TAG_RES_STOP) this.setReservation('stop', v)
+        }
+    }
+
+    /* `minutes` counts from now; 0 cancels. */
+    setReservation(which: 'start' | 'stop', minutes: number) {
+        const wanted = minutes > 0 ? Date.now() + minutes * 60 * 1000 : undefined
+        if (this.resDeadline[which] === wanted) return
+
+        this.resDeadline[which] = wanted
+        this.persistReservation()
+        log('status', this.id, `reservation ${which}`, minutes > 0 ? `in ${minutes} min` : 'cleared')
+        this.publishReservation()
+    }
+
+    persistReservation() {
+        this.resStore?.save(this.id, this.resDeadline)
+    }
+
+    reservationRemaining(which: 'start' | 'stop') {
+        const deadline = this.resDeadline[which]
+        if (deadline == null) return 0
+        return Math.max(0, Math.ceil((deadline - Date.now()) / (60 * 1000)))
+    }
+
+    reservationTick() {
+        for (const which of ['start', 'stop'] as const) {
+            const deadline = this.resDeadline[which]
+            if (deadline != null && Date.now() >= deadline) {
+                this.resDeadline[which] = undefined
+                this.persistReservation()
+                this.fireReservation(which)
+            }
+        }
+        /* Republished every minute regardless: it is both the app's countdown and what keeps the
+         * reservation keys present in the cloud's snapshot. */
+        this.publishReservation()
+    }
+
+    fireReservation(which: 'start' | 'stop') {
+        const on = which === 'start'
+        log('status', this.id, `reservation ${which} due - turning the unit`, on ? 'on' : 'off')
+
+        this.raw_clip_state[TAG_POWER] = on ? 1 : 0
+        /* Same tags the power entity attaches: this family ignores a bare power-on write. */
+        const tags = on && this.powerOnWithModeWrite ? [TAG_POWER, TAG_MODE, TAG_FAN, TAG_TEMP_TARGET] : [TAG_POWER]
+        const fields = tags
+            .filter((id) => this.raw_clip_state[id] != null)
+            .map((id) => ({ t: id, v: this.raw_clip_state[id] }))
+        this.send([1, 1, 2, 1, 1], fields)
+    }
+
+    /*
+     * Report the reservation bundle upstream as if the appliance had sent it. Without this the
+     * cloud has no reservation keys for the device at all and the app's screen cannot open.
+     */
+    publishReservation() {
+        const start = this.reservationRemaining('start')
+        const stop = this.reservationRemaining('stop')
+        this.raw_clip_state[TAG_RES_START] = start
+        this.raw_clip_state[TAG_RES_STOP] = stop
+
+        this.reportUpstream([
+            { t: TAG_RES_START, v: start },
+            { t: TAG_RES_STOP, v: stop },
+            { t: TAG_RES_RELATIVE_START, v: 0 },
+            { t: TAG_RES_RELATIVE_STOP, v: 0 },
+            { t: TAG_RES_BAN_DISTURB_SLEEP, v: 0 },
+            { t: TAG_RES_CANCEL, v: 0 },
+            { t: TAG_RES_STOP_HEATING, v: 0 },
+        ])
+    }
+
+    /*
+     * Emit a device->cloud frame in the shape this appliance family uses for an unsolicited
+     * report (0xa7 / sub 0x04). Emitting it on the device object feeds both the bridge, which is
+     * the point, and our own parser, which keeps the HA entities in step.
+     */
+    reportUpstream(fields: TLV.TLV[]) {
+        const payload = TLV.build(fields)
+        let buf = [0x04, 0x00, 0x00, 0x00, 0xa7, 0x02, 0x04, this.resSeq++ & 0xff, payload.length].concat(payload)
+        const crc = crc16(buf)
+        buf = [0x00, 0x00].concat(buf, [crc >> 8, crc & 0xff])
+        this.thinq.emit('data', Buffer.from(buf))
     }
 
     processPrivData(cmd: number, buf9: number, data: Buffer) {
@@ -630,6 +830,16 @@ export default abstract class ACDevice extends TLVDevice {
     }
 
     /*
+     * Deliberately not read from the capability bitmap, which does advertise the pair on units
+     * that have no use for the entities: a schedule the appliance keeps to itself is one Home
+     * Assistant cannot see the effect of until it fires. With the relay on it is this driver
+     * running the countdown, so there is something to show and the entities are worth having.
+     */
+    hasStartStopTimers() {
+        return this.relayReservation
+    }
+
+    /*
      * Which swing axes the unit has, and how each is wired. Derived from the capability bitmap by
      * default: the numbered vane positions on 0x321 / 0x322. A unit whose bitmap does not describe
      * its swing - because it reports the plain on/off pair instead, or because the bitmap does not
@@ -851,6 +1061,11 @@ export default abstract class ACDevice extends TLVDevice {
             read_xform: (raw) => this.fanMaps.toLabel.get(raw),
             write_xform: (val) => this.fanMaps.toWire.get(val),
             write_attach: [TAG_MODE, TAG_TEMP_TARGET],
+            read_callback: (val) => {
+                if (this.fanPrev !== val) for (const hook of this.fanChangeHooks) hook()
+                this.fanPrev = val
+                return true
+            },
         })
 
         this.addField(config, {
@@ -1004,8 +1219,13 @@ export default abstract class ACDevice extends TLVDevice {
         }
 
         if (this.hasSleepTimer()) {
-            // 15h - displayed in hex as "FH"
-            this.addTimerField(config, 0x21a, 'sleeptimer', 'Sleep timer', 'mdi:bed-clock', 15)
+            // 15h by default - displayed in hex as "FH"
+            this.addTimerField(config, 0x21a, 'sleeptimer', 'Sleep timer', 'mdi:bed-clock', this.sleepTimerMaxMinutes)
+        }
+
+        if (this.hasStartStopTimers()) {
+            this.addTimerField(config, 0x21c, 'starttimer', 'Turn-on timer', 'mdi:timer-play', 24 * 60)
+            this.addTimerField(config, 0x21b, 'stoptimer', 'Turn-off timer', 'mdi:timer-stop', 24 * 60)
         }
 
         if (this.hasEnergySave()) {
@@ -1329,32 +1549,38 @@ export default abstract class ACDevice extends TLVDevice {
         )
     }
 
-    addTimerField(config: DeviceDiscovery, id: number, name: string, desc: string, icon: string, max: number) {
+    /*
+     * A timer, in minutes. `box` rather than `slider`: a minute-resolution timer is set by typing
+     * a number, and an HA number entity has one display mode, so a second slider entity would
+     * only be a second row saying the same thing. A dashboard that wants to drag can add the
+     * tile card's numeric-input feature, which draws a slider for this entity either way.
+     *
+     * Minutes rather than hours because that is what the wire carries and what a running timer
+     * counts down in - the entity's own value is the time left.
+     */
+    addTimerField(config: DeviceDiscovery, id: number, name: string, desc: string, icon: string, maxMinutes: number) {
         const comp = {
             platform: 'number',
             unique_id: '$deviceid-' + name,
             name: desc,
             icon: icon,
             device_class: 'duration',
-            unit_of_measurement: 'h',
+            unit_of_measurement: 'min',
             min: 0,
-            max: max,
-            step: 0.25,
-            mode: 'slider',
+            max: maxMinutes,
+            step: 1,
+            mode: 'box',
         } as const
         config['components'][name] = comp
 
         /*
          * Upon setting this field the device starts counting down and
          * every minute sends the remaining time.
+         *
+         * The write transform is not optional even though minutes go on the wire as they come in:
+         * setProperty drops a write whose field has no write_xform.
          */
-        this.addField(config, {
-            id: id,
-            name: '',
-            comp: name,
-            read_xform: (raw) => Math.ceil(raw / 60 / 0.25) * 0.25,
-            write_xform: (val) => Math.round(Number(val) * 60),
-        })
+        this.addField(config, { id: id, name: '', comp: name, write_xform: (val) => Math.round(Number(val)) })
     }
 
     addJetField(

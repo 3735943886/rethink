@@ -23,6 +23,7 @@ import log, { setFilter as setLogFilter } from './util/logging'
 import { DeviceManager } from './cloud/devmgr'
 import { Bridge } from './bridge'
 import { JSONStorage } from './bridge/state'
+import { ReservationJSONStore } from './bridge/reservation-store'
 
 const configPath = resolve(process.argv[2] ?? './config.json')
 const configDir = dirname(configPath)
@@ -158,8 +159,13 @@ function t2setup(manager: DeviceManager, firmwareHosts: FirmwareHosts) {
     acceptor.on('newDevice', manager.accept.bind(manager))
 }
 
+// Persistent driver state that outlives a restart. Right now that is the absolute deadlines of the
+// on/off reservation the AC drivers relay; without a bridge storage path they simply run in memory.
+if (config.bridge) mkdirSync(config.bridge.storage_path, { recursive: true })
+const reservationStore = config.bridge ? new ReservationJSONStore(config.bridge.storage_path) : undefined
+
 // HA connector
-const ha = new HA_bridge(new HA_connection(config.homeassistant))
+const ha = new HA_bridge(new HA_connection(config.homeassistant), reservationStore)
 const manager = new DeviceManager()
 manager.on('newDevice', (dev) => ha.newDevice(dev))
 
@@ -172,7 +178,6 @@ t2setup(manager, firmwareHosts)
 
 let bridge: Bridge | undefined
 if (config.bridge) {
-    mkdirSync(config.bridge.storage_path, { recursive: true })
     const storage = new JSONStorage(config.bridge.storage_path)
     bridge = new Bridge(storage, manager, firmwareHosts)
 }
