@@ -72,12 +72,18 @@ class BridgedDevice {
     reconnectNow() {
         const U = this.upstream
         const D = this.downstream
+        // The close/error listeners are attached inside each branch rather than once at the end: the
+        // two connection classes no longer carry the same set of events, and on() called on the union
+        // of them is not callable.
         if (U instanceof Thinq1Device && D instanceof T1Downstream) {
-            this.connection = new Thinq1Connection(U)
+            const conn = new Thinq1Connection(U)
             // feed the initial state to the connection
-            if (D.lastReport) this.connection.send(D.lastReport)
+            if (D.lastReport) conn.send(D.lastReport)
 
-            this.connection.on('data', (payload) => D.send(payload))
+            conn.on('data', (payload) => D.send(payload))
+            conn.on('close', () => this.disconnect())
+            conn.on('error', console.log)
+            this.connection = conn
         } else if (U instanceof Thinq2Device && D instanceof T2Downstream) {
             // Forward the physical device's real deploy appInfo/platformInfo so the upstream
             // preDeploy reports its true protocolVer/softVer/etc. instead of placeholders.
@@ -91,17 +97,15 @@ class BridgedDevice {
                         (payload.data as { updatingFwInfo?: { downloadUrl?: unknown } } | undefined)?.updatingFwInfo
                             ?.downloadUrl,
                     )
-                D.send(payload.cmd, payload.type ?? 0, (payload.data ?? {}) as object)
+                D.forward_clip(payload)
             }
+            conn.on('close', () => this.disconnect())
+            conn.on('error', console.log)
             this.connection = conn
-            this.connection.on('data', (payload) => D.send_packet(payload))
         } else {
             console.warn("Can't connect bridge")
             return
         }
-
-        this.connection.on('close', () => this.disconnect())
-        this.connection.on('error', console.log)
     }
 
     reconnectTimeout: NodeJS.Timeout | undefined

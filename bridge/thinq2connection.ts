@@ -2,14 +2,16 @@ import * as mqtt from 'mqtt'
 import { Thinq2Device } from './thinqApi'
 import { TypedEmitter } from 'tiny-typed-emitter'
 import log from '@/util/logging'
+import { type ClipEnvelope } from '@/cloud/thinq2/clip'
 
+// No 'data' event: a packet from the cloud is a clip message like any other and goes to onCloudClip
+// with its envelope intact, rather than being unwrapped here and rebuilt on the far side.
 type ConnectionEvents = {
-    data: (buffer: Buffer) => void
     close: () => void
     error: (error: Error) => void
 }
 
-export type ClipPayload = { cmd: string; type?: number; data?: unknown; [key: string]: unknown }
+export type ClipPayload = ClipEnvelope
 
 /*
  * Cmds that must never cross the bridge, in either direction.
@@ -136,12 +138,10 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
 
                     if (payload.cmd === 'packet') {
                         log('bridge', `${this.device.deviceId} <- ${payload.data}`)
-                        this.emit('data', Buffer.from(payload.data, 'hex'))
-                    }
-
-                    // Only the two cmds above are acted on here; everything else is carried to the
-                    // appliance as it stands, or logged as refused.
-                    if (payload.cmd !== 'completeProvisioning' && payload.cmd !== 'packet') {
+                        this.onCloudClip?.(payload as ClipPayload)
+                    } else if (payload.cmd !== 'completeProvisioning') {
+                        // completeProvisioning is answered above and goes no further; everything else
+                        // is carried to the appliance as it stands, or logged as refused.
                         const relayed = isRelayable(payload.cmd)
                         log('bridge', `${this.device.deviceId} <- ${relayed ? 'relay' : 'refused'} ${payload.cmd}`)
                         if (relayed) this.onCloudClip?.(payload as ClipPayload)

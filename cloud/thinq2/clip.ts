@@ -9,6 +9,15 @@ export type ClipMessage<Cmd = string, Payload = unknown> = {
     type: number
 }
 
+/*
+ * A clip message as it arrived, rather than as this codebase would have written it.
+ *
+ * Deliberately looser than ClipMessage: the cloud does not fill in every field an appliance does - an
+ * acknowledgement carries no `kind` - and a message being carried across the bridge unchanged must not
+ * have to satisfy a type describing the other direction.
+ */
+export type ClipEnvelope = { cmd: string; type?: number; data?: unknown; [key: string]: unknown }
+
 export type DeployPayload = {
     appInfo: {
         modelName: string
