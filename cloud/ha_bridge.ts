@@ -24,6 +24,7 @@ import AIR_910604_WW from './devices/AIR_910604_WW'
 import PAC_910604_WW from './devices/PAC_910604_WW'
 import D140110 from './devices/D140110'
 import WPU4CIGCR from './devices/1WPU4CIGCR__2'
+import DHUM_231006_WW from './devices/DHUM_231006_WW'
 import { Device as T1Device } from './thinq1/device'
 import { Device as T2Device } from './thinq2/device'
 import { type Connection } from './homeassistant'
@@ -67,6 +68,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     PAC_910604_WW, // LG stand air conditioner (deviceType 401); ac_common subclass
     D140110, // LG dishwasher (deviceType 204), status only
     ['1WPU4CIGCR__2']: WPU4CIGCR, // LG water purifier (deviceType 103), status only
+    DHUM_231006_WW, // LG dehumidifier sold in Korea (deviceType 403, TLV state frames marked 0xa7)
 }
 
 class Bridge {
