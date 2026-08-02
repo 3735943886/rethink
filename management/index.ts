@@ -298,7 +298,17 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 }
             })
 
+            /*
+             * The appliance's own listeners have to go too, not just the manager's. They were left
+             * attached, so every monitor page that had ever been opened went on forwarding that
+             * appliance's traffic into a socket that was already closed - and an appliance that stays
+             * connected for days collects one such pair per page view. Only a reconnect cleared them,
+             * by replacing the Device object they were attached to.
+             */
             ws.on('close', () => {
+                device?.removeListener('data', onDeviceRx)
+                device?.removeListener('sendData', onDeviceTx)
+                device = undefined
                 manager.removeListener('newDevice', checkDevicePresence)
                 manager.removeListener('dropDevice', checkDevicePresence)
             })

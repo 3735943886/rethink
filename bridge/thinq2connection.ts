@@ -152,27 +152,44 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
             }
         })
 
-        this.mqtt.on('connect', async () => {
+        /*
+         * Both awaits below can reject - a subscribe is what AWS IoT refuses when its policy does not
+         * cover the topic, and that has happened here before. An async listener that rejects raises an
+         * unhandled rejection, which Node answers by killing the process: one appliance's bad subscribe
+         * would take rethink down for every other appliance with it. Route it through the connection's
+         * own error path instead, where the bridge already knows how to drop the connection and try
+         * again in five seconds.
+         */
+        this.mqtt.on('connect', () => {
             log('bridge', `${this.device.deviceId} connected`)
-            await this.mqtt.subscribe(this.device.state!.subTopic)
-            await this.mqtt.publish(
-                this.device.state!.provTopic,
-                JSON.stringify({
-                    mid: ++this.mid,
-                    did: this.device.deviceId,
-                    kind: this.device.meta.modelName,
-                    cmd: 'preDeploy',
-                    rssi: -48,
-                    fs: 'idle',
-                    data: deployInfo(this.device, this.deployAppInfo, this.deployPlatformInfo),
-                    type: 0,
-                }),
-                { qos: 1 },
-            )
+            this.announce().catch((err) => {
+                log('bridge', `${this.device.deviceId} could not announce itself: ${err}`)
+                this.emit('error', err instanceof Error ? err : new Error(String(err)))
+                this.mqtt.end()
+            })
         })
 
         this.mqtt.on('close', () => this.emit('close'))
         this.mqtt.on('error', (err) => this.emit('error', err))
+    }
+
+    // Subscribe to what the cloud sends this appliance, then introduce the appliance to it.
+    async announce() {
+        await this.mqtt.subscribeAsync(this.device.state!.subTopic)
+        await this.mqtt.publishAsync(
+            this.device.state!.provTopic,
+            JSON.stringify({
+                mid: ++this.mid,
+                did: this.device.deviceId,
+                kind: this.device.meta.modelName,
+                cmd: 'preDeploy',
+                rssi: -48,
+                fs: 'idle',
+                data: deployInfo(this.device, this.deployAppInfo, this.deployPlatformInfo),
+                type: 0,
+            }),
+            { qos: 1 },
+        )
     }
 
     /* Called with the cloud's answer to a relayed cmd. See Device.onUnhandledClip. */

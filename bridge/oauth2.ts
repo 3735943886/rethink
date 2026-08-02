@@ -62,16 +62,22 @@ export async function fromCode(authUrl: string, code: string): Promise<Token> {
         params,
     )
 
+    /*
+     * The three fields are all required. Written as `(a && b && c) || typeof expires_in === 'number'`
+     * this accepted a reply that carried nothing but a numeric expires_in - no tokens at all - and
+     * handed back a Token whose fields were undefined, to fail later somewhere with no bearing on
+     * the login that actually went wrong.
+     */
+    const expiresIn = Number(response.expires_in)
     if (
-        (typeof response.access_token === 'string' &&
-            typeof response.refresh_token === 'string' &&
-            typeof response.expires_in === 'string') ||
-        typeof response.expires_in === 'number'
+        typeof response.access_token === 'string' &&
+        typeof response.refresh_token === 'string' &&
+        Number.isFinite(expiresIn)
     ) {
         return {
-            accessToken: response.access_token!,
-            refreshToken: response.refresh_token!,
-            validUntil: Date.now() + Number(response.expires_in) * 1000,
+            accessToken: response.access_token,
+            refreshToken: response.refresh_token,
+            validUntil: Date.now() + expiresIn * 1000,
         }
     } else {
         throw new Error(`OAuth2 sign-in failed: ${JSON.stringify(response)}`)
