@@ -32,10 +32,20 @@ import HADevice from './base'
  *                   leaves the same pair unmapped.
  *   0x173 = 5641235, 0x174 = 1376511   constant over the whole session, 3-byte counters
  *   0x3b9 = 4, 0x3ec, 0x350, 0x374, 0x2af   constant
- *   0x21c, 0x226, 0x324, 0x33a, 0x2ac, 0x186, 0x3ea   zero throughout
+ *   0x21c, 0x226, 0x324, 0x33a, 0x2ac, 0x3ea   zero throughout
+ *   0x186           zero throughout here, but NAMED on the sibling model: DHUM_056905_WW's
+ *                   ThinQ JSON calls it airState.waterTank.full, an enum of 0 not-full,
+ *                   1 full-and-stopped, 2 full-and-still-blowing. Zero for a whole session
+ *                   is exactly what a tank nobody filled would report, so this is a
+ *                   candidate rather than a dead tag - INHERITED FROM THE SIBLING, NOT
+ *                   MEASURED HERE, and left unmapped until someone fills the tank on this
+ *                   model and watches it.
  *   0x360           tracks 0x1f7 exactly in both observed power transitions (1 while on,
  *                   0 while off). Two observations cannot separate "second power flag" from
- *                   "something that merely agreed twice", so it publishes nothing.
+ *                   "something that merely agreed twice", so it publishes nothing. The
+ *                   sibling's JSON names it airState.miscFuncState.airRemoval (공기제균),
+ *                   and on the 056905 unit it stayed 0 across 315 frames while power
+ *                   toggled - so the power-mirror reading does not hold there.
  *   0x3eb           the app writes 0x3eb = 0 about a second after each power-off, twice out
  *                   of two. Unnamed, and this profile never sends it.
  *   mode 22         the appliance's own (0x2d7, 0x2d8, 0x2d9) triple table in state frames
