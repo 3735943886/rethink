@@ -162,6 +162,9 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
         res.accept().then((ws) => {
             let injectFlag = false
             let device: AnyDevice | undefined
+            // Kept here as well as on the device, so that an appliance which reconnects mid-experiment
+            // comes back observe-only instead of silently accepting the next command from the cloud.
+            let blockToDevice = false
             const onDeviceRx = (arg: Buffer) => {
                 ws.send(JSON.stringify({ rx: arg.toString('hex'), injected: injectFlag }))
             }
@@ -180,7 +183,8 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
 
                     device = dev
                     if (device) {
-                        ws.send(JSON.stringify({ status: 'online', meta: device.meta }))
+                        if (device instanceof T2Device) device.blockToDevice = blockToDevice
+                        ws.send(JSON.stringify({ status: 'online', meta: device.meta, blockToDevice }))
                         device.on('data', onDeviceRx)
                         device.on('sendData', onDeviceTx)
                     } else {
@@ -206,6 +210,20 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 const dev = manager.allDevices[id]
 
                 try {
+                    /*
+                     * Observe-only: hold back everything the cloud addresses to this appliance, while
+                     * still reporting it here. This is how the ThinQ app's own control frames get
+                     * recorded without the appliance carrying the command out - press "start" in the
+                     * app, keep the bytes, and the machine stays put. Off by default, and it lasts
+                     * only as long as this monitor connection asks for it.
+                     */
+                    if (typeof json.blockToDevice === 'boolean') {
+                        blockToDevice = json.blockToDevice
+                        if (dev instanceof T2Device) dev.blockToDevice = blockToDevice
+                        log('MGMT', id, `observe-only ${blockToDevice ? 'on' : 'off'}`)
+                        ws.send(JSON.stringify({ blockToDevice }))
+                    }
+
                     if (typeof json.sendToDevice === 'object' && dev && dev instanceof T1Device) {
                         try {
                             injectFlag = true

@@ -26,6 +26,13 @@ function connect() {
 
     ws.onopen = () => {
         get('device_status').innerText = 'offline'
+
+        // Observe only: the cloud's packets keep arriving here, but rethink stops handing them to
+        // the appliance. Re-asserted on every (re)connect so a reload does not quietly lift it.
+        const block = get('blocktodevice')
+        const sendBlock = () => ws.send(JSON.stringify({ blockToDevice: block.checked }))
+        block.onchange = sendBlock
+        if (block.checked) sendBlock()
     }
 
     ws.onmessage = (ev) => {
@@ -46,6 +53,8 @@ function connect() {
                     M.updateTextFields()
                 }
             }
+
+            if (json.blockToDevice !== undefined) get('blocktodevice').checked = json.blockToDevice
 
             if (json.status) {
                 get('device_status').innerText = json.status
