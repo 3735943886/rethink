@@ -27,12 +27,13 @@ function connect() {
     ws.onopen = () => {
         get('device_status').innerText = 'offline'
 
-        // Observe only: the cloud's packets keep arriving here, but rethink stops handing them to
-        // the appliance. Re-asserted on every (re)connect so a reload does not quietly lift it.
+        // Observe only: the cloud's packets keep arriving here, but rethink stops handing them to the
+        // appliance. The appliance holds the state - this page only asks for a change and then shows
+        // whatever comes back, so opening or reloading a page never lifts a block someone else set.
         const block = get('blocktodevice')
         const sendBlock = () => ws.send(JSON.stringify({ blockToDevice: block.checked }))
         block.onchange = sendBlock
-        if (block.checked) sendBlock()
+        if (block.checked) sendBlock() // this page had it on before the socket dropped: ask again
     }
 
     ws.onmessage = (ev) => {
@@ -83,6 +84,13 @@ function connect() {
         }
     }
 }
+
+// Same as the panel: a page restored from the back/forward cache has had its socket closed, and
+// waiting out the retry timer would show a dead monitor for five seconds.
+window.addEventListener('pageshow', (ev) => {
+    if (!ev.persisted) return
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) connect()
+})
 
 function pushMessage(direction, payload, injected) {
     const timestamp = document.createElement('span')
