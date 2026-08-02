@@ -13,7 +13,33 @@ import HADevice from './base'
  */
 const CAPS_ONLY_TAGS = new Set([0x2d5, 0x2d6, 0x336, 0x2e5, 0x2e6, 0x2da])
 
-/** Observed on bucket-empty notify when the tank is reinstalled (0x2b1=256, 0x2b2=0). */
+/**
+ * Water tank, TLV 0x186 = airState.waterTank.full, named by this model's own ThinQ model
+ * JSON (label `watertankFull_state_tlv_390`, 390 = 0x186). Three states, not two:
+ *
+ *   0  @AP_NOT_FULL_W        tank has room
+ *   1  @AP_FULL_STOP_W       full, appliance has stopped
+ *   2  @AP_FULL_FAN_MODE_W   full, appliance keeps the fan running
+ *
+ * Both 1 and 2 mean "go and empty it", which is what the binary sensor reports; the
+ * distinction is published separately so the reason is not lost.
+ */
+const TAG_WATER_TANK = 0x186
+const WATER_TANK_STATE: Record<number, string> = {
+    0: 'not_full',
+    1: 'full_stopped',
+    2: 'full_fan_mode',
+}
+
+/**
+ * Observed on bucket-empty notify when the tank is reinstalled (0x2b1=256, 0x2b2=0).
+ *
+ * Kept as a secondary signal, not the primary one. Neither 0x2b1 nor 0x2b2 appears anywhere
+ * in this model's ThinQ JSON, while 0x186 is named for exactly this purpose - but the pair
+ * was observed moving on a real bucket event by the author of upstream PR #64, and our own
+ * unit has never emitted any of the three (the tank was never filled during capture), so
+ * there is nothing here that can adjudicate between them. Both feed the same sensor.
+ */
 const BUCKET_EMPTIED_EVENT = 256
 
 /** Entering these modes resets fan speed to low (high remains user-selectable). */
@@ -101,11 +127,19 @@ export default class Device extends TLVDevice {
                     min_humidity: 30,
                     max_humidity: 70,
                 },
-                ionizer: {
+                /*
+                 * 0x360 is airState.miscFuncState.airRemoval - 공기제균, the same tag and the
+                 * same name AIR_910604_WW publishes as "Air sterilization". PR #64 called this
+                 * one "Ionizer", but the ioniser on this appliance is an operation MODE, wire
+                 * 22 = @AP_MAIN_MID_OPMODE_IONIZER_W, not a switch. Naming the switch after the
+                 * mode would have left two different things called the ioniser and neither of
+                 * them the one the app means.
+                 */
+                sterilization: {
                     platform: 'switch',
-                    unique_id: '$deviceid-ionizer',
-                    name: 'Ionizer',
-                    icon: 'mdi:air-filter',
+                    unique_id: '$deviceid-sterilization',
+                    name: 'Air sterilization',
+                    icon: 'mdi:shield-sun',
                 },
                 uv_nano: {
                     platform: 'switch',
@@ -145,6 +179,14 @@ export default class Device extends TLVDevice {
                     payload_on: 'ON',
                     payload_off: 'OFF',
                     state_topic: '$this/bucket_full-',
+                },
+                bucket_state: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-bucket_state',
+                    name: 'Water tank',
+                    icon: 'mdi:cup-water',
+                    entity_category: 'diagnostic',
+                    state_topic: '$this/bucket_state-',
                 },
                 temperature: {
                     platform: 'sensor',
@@ -278,11 +320,11 @@ export default class Device extends TLVDevice {
             write_attach: [0x1f7, 0x1f9],
         })
 
-        // ionizer on/off (0x360 on live notify packets: 0=OFF, 1=ON)
+        // 공기제균 on/off (0x360 on live notify packets: 0=OFF, 1=ON) - see the component above
         this.addField(config, {
             id: 0x360,
             name: '',
-            comp: 'ionizer',
+            comp: 'sterilization',
             read_xform: (raw) => (raw ? 'ON' : 'OFF'),
             write_xform: (val) => (val === 'ON' ? 1 : 0),
             write_attach: [0x1f7, 0x1f9],
@@ -424,6 +466,17 @@ export default class Device extends TLVDevice {
         }
         // Mode-fan capability rows (0x2d7/0x2d8/0x2d9) repeat once per mode — not global state.
         if (k === 0x2d7 || k === 0x2d8 || k === 0x2d9) return
+        /*
+         * The named tank tag. Anything other than 0 means the tank wants emptying; which of the
+         * two full states it is decides only whether the appliance kept the fan going, so that
+         * goes to its own diagnostic sensor rather than changing what the problem sensor says.
+         */
+        if (k === TAG_WATER_TANK) {
+            this.raw_clip_state[k] = v
+            this.publishBucketFullState(v !== 0)
+            this.HA.publishProperty(this.id, 'bucket_state-', WATER_TANK_STATE[v] ?? String(v), { retain: true })
+            return
+        }
         if (k === 0x2b1) {
             this.raw_clip_state[k] = v
             if (v === BUCKET_EMPTIED_EVENT) this.publishBucketFullState(false)
@@ -461,6 +514,7 @@ export default class Device extends TLVDevice {
                 t === 0x1fa ||
                 t === 0x21b ||
                 t === 0x21e ||
+                t === TAG_WATER_TANK ||
                 t === 0x2b2 ||
                 t === 0x253 ||
                 t === 0x2a2 ||

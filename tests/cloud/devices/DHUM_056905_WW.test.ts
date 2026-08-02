@@ -55,8 +55,8 @@ function expectedFanSpeedTlvs(fan: 2 | 6): TLV.TLV[] {
     ]
 }
 
-// Live notify when ionizer turned off on device panel
-const IONIZER_OFF_NOTIFY_HEX = '000004000000A702043F02D80085A3'
+// Live notify when 공기제균 (airRemoval, 0x360) turned off on device panel
+const STERILIZE_OFF_NOTIFY_HEX = '000004000000A702043F02D80085A3'
 
 const UV_ON_NOTIFY_HEX = '000004000000A702044B02A88184D7'
 const UV_OFF_NOTIFY_HEX = '000004000000A702044A08A8808C90388CD041E991'
@@ -126,7 +126,7 @@ describe(MODEL_ID, () => {
         assert.equal(components.off_timer.min, 0)
         assert.equal(components.off_timer.max, 9)
         assert.equal(components.off_timer.step, 1)
-        assert.ok(components.ionizer, 'ionizer switch')
+        assert.ok(components.sterilization, 'air sterilization switch')
         assert.ok(components.uv_nano, 'uv_nano switch')
         assert.ok(components.bucket_light, 'bucket_light switch')
         assert.equal(components.bucket_full.device_class, 'problem')
@@ -143,7 +143,7 @@ describe(MODEL_ID, () => {
 
         const props = ha.devices[DEVICE_ID]!.properties
         assert.equal(props['humidifier-target_humidity'], 35)
-        assert.equal(props['ionizer-'], 'ON')
+        assert.equal(props['sterilization-'], 'ON')
         assert.equal(props['uv_nano-'], 'OFF')
         assert.equal(props['fan_speed-'], 'low')
     })
@@ -213,11 +213,11 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID]!.properties['uv_nano-'], 'OFF')
     })
 
-    test('ionizer off notify uses tlv 0x360', (t) => {
+    test('air sterilization off notify uses tlv 0x360', (t) => {
         const { ha, thinq } = buildReadyDevice(t)
 
-        thinq.emit('data', buf(IONIZER_OFF_NOTIFY_HEX))
-        assert.equal(ha.devices[DEVICE_ID]!.properties['ionizer-'], 'OFF')
+        thinq.emit('data', buf(STERILIZE_OFF_NOTIFY_HEX))
+        assert.equal(ha.devices[DEVICE_ID]!.properties['sterilization-'], 'OFF')
     })
 
     test('bucket full uses 0x2b2 steady state; 0x2b1=256 clears; humidity does not affect bucket', (t) => {
@@ -235,6 +235,29 @@ describe(MODEL_ID, () => {
 
         thinq.emit('data', buf(BUCKET_FULL_NOTIFY_HEX))
         assert.equal(ha.devices[DEVICE_ID]!.properties['bucket_full-'], 'ON')
+    })
+
+    test('water tank 0x186 drives the bucket sensor and reports which full state it is', (t) => {
+        const { ha, thinq } = buildReadyDevice(t)
+        const props = () => ha.devices[DEVICE_ID]!.properties
+
+        // 0 = @AP_NOT_FULL_W
+        thinq.emit('data', buf(notify([{ t: 0x186, v: 0 }])))
+        assert.equal(props()['bucket_full-'], 'OFF')
+        assert.equal(props()['bucket_state-'], 'not_full')
+
+        // 1 = @AP_FULL_STOP_W — full, appliance stopped
+        thinq.emit('data', buf(notify([{ t: 0x186, v: 1 }])))
+        assert.equal(props()['bucket_full-'], 'ON')
+        assert.equal(props()['bucket_state-'], 'full_stopped')
+
+        // 2 = @AP_FULL_FAN_MODE_W — still full, so still a problem, but a different reason
+        thinq.emit('data', buf(notify([{ t: 0x186, v: 2 }])))
+        assert.equal(props()['bucket_full-'], 'ON')
+        assert.equal(props()['bucket_state-'], 'full_fan_mode')
+
+        thinq.emit('data', buf(notify([{ t: 0x186, v: 0 }])))
+        assert.equal(props()['bucket_full-'], 'OFF')
     })
 
     test('bucket light on/off notify uses tlv 0x21e', (t) => {
@@ -255,13 +278,13 @@ describe(MODEL_ID, () => {
         assert.ok(pkt.includes('94D02D'), 'target humidity 45 encoded as tlv 0x253')
     })
 
-    test('ionizer toggle write uses tlv 0x360', (t) => {
+    test('air sterilization toggle write uses tlv 0x360', (t) => {
         const { thinq, dev } = buildReadyDevice(t)
 
-        dev.setProperty('ionizer-', 'ON')
+        dev.setProperty('sterilization-', 'ON')
         const pkt = hex(thinq.outbox[thinq.outbox.length - 1])
-        assert.ok(pkt.includes('D801'), 'ionizer tlv 0x360=1 present')
-        assert.ok(pkt.includes('7DC1'), 'power+mode attached to ionizer write')
+        assert.ok(pkt.includes('D801'), 'airRemoval tlv 0x360=1 present')
+        assert.ok(pkt.includes('7DC1'), 'power+mode attached to the sterilization write')
     })
 
     test('uv_nano toggle write uses tlv 0x2a2', (t) => {
