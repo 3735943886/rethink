@@ -71,11 +71,11 @@
             }
 
             /*
-             * The two switches used to be floated inside the "Messages" heading, which made the
-             * heading a layout container: when the row ran out of width the float dropped below it and
-             * took half of the second switch with it, leaving its name on one line and its lever on the
-             * next. Here each switch is one inline-flex unit that cannot be split, and the row wraps
-             * between them instead.
+             * Auto-scroll used to be floated inside the "Messages" heading, which made the heading a
+             * layout container: once the row ran out of width the float dropped below it and took half
+             * the switch with it, leaving its name on one line and its lever on the next. It is a row
+             * of its own now, and each switch in it is one inline-flex unit that cannot be split - the
+             * row wraps between switches instead of through one.
              */
             .monitor-controls {
                 display: flex;
@@ -98,7 +98,7 @@
                 cursor: pointer;
             }
 
-            /* The lever alone says on or off; the words doubled the width of every switch. */
+            /* The lever alone says on or off; the Off/On words either side doubled its width. */
             .monitor-controls .switch label .lever {
                 margin: 0;
             }
@@ -129,7 +129,7 @@
 
         <div class="reduced_margins container flex_y flex_grow" style="overflow: hidden">
             <h4 class="header orange-text">Messages</h4>
-            <div class="monitor-controls" id="monitor_controls">
+            <div class="monitor-controls">
                 <span class="toggle">
                     <label for="autoscroll">Auto-scroll</label>
                     <span class="switch">
