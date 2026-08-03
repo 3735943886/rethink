@@ -14,7 +14,7 @@ aid, or simply to allow the user to still use the original LG app alongside Home
 The following appliances are currently supported in rethink:
 
 - Air Conditioners:
-    - 👍 LG DualCool family (Standard 2, Deluxe with and without air purifier, etc.) wall-mounted Air Conditioner IDUs - high level of support. What's missing are mostly some features of higher-end models, energy reporting for Single devices and more diagnostic coverage,
+    - 👍 LG DualCool family (Standard 2, Deluxe with and without air purifier, etc.) wall-mounted Air Conditioner IDUs - high level of support. What's missing are mostly some features of higher-end models and more diagnostic coverage,
     - 👍 LW1822HRSM, Smart Window Air Conditioner - mostly working,
     - 👍 LP1022FVSM Portable Air Conditioner - mostly working,
 - Fridges:
@@ -37,6 +37,8 @@ The following appliances are currently supported in rethink:
     - 🫤 DLE7300WE - preliminary support
     - 👍 DLEX3900B (RV13B6BSD_D_US_WIFI), Electric Dryer - mostly working
     - 👍 RH14_N_KR, 14 kg Heat-Pump Dryer (Korea) - status reporting, course selection, start/pause/power off
+- WashTowers (combined washer+dryer):
+    - 👍 WKEX200HBA (WTL_FXU_BDV_NA_01), WashTower - mostly working
 - Clothing care:
     - 👍 S3BF_POD_DN4, LG Styler (Korea) - status reporting, course selection, start/pause/power off
 - Water:

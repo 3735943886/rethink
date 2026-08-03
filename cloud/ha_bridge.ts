@@ -30,6 +30,7 @@ import F24VDD from './devices/F24VDD'
 import RH14_N_KR from './devices/RH14_N_KR'
 import S3BF_POD_DN4 from './devices/S3BF_POD_DN4'
 import Pd0F_F from './devices/Pd0F_F'
+import WTL_FXU_BDV_NA_01 from './devices/WTL_FXU_BDV_NA_01'
 import { Device as T1Device } from './thinq1/device'
 import { Device as T2Device } from './thinq2/device'
 import { type Connection } from './homeassistant'
@@ -80,6 +81,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     RH14_N_KR, // LG heat-pump dryer sold in Korea (deviceType 202), status only
     S3BF_POD_DN4, // LG Styler clothing care cabinet (deviceType 203), status only
     Pd0F_F, // LG 2nd Mini Washer pedestal drawer (deviceType 201), status only
+    WTL_FXU_BDV_NA_01, // LG WashTower (WKEX200HBA), washer and dryer on one device
 }
 
 class Bridge {

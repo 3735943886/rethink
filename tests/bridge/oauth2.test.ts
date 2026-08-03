@@ -1,45 +1,77 @@
-import { describe, test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { createServer, type Server } from 'node:http'
-import { AddressInfo } from 'node:net'
-import { fromCode } from '@/bridge/oauth2'
+import { createServer } from 'node:http'
+import { test } from 'node:test'
+import { fromCode, refresh } from '@/bridge/oauth2'
 
-// LG's token endpoint, answering whatever the test puts in `reply`.
-let reply: unknown = {}
-let server: Server
-let authUrl: string
-
-describe('OAuth2 sign-in', () => {
-    before(async () => {
-        server = createServer((req, res) => {
-            res.setHeader('content-type', 'application/json')
-            res.end(JSON.stringify(reply))
-        })
-        await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-        authUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+async function withResponse<T>(body: unknown, run: (url: string) => Promise<T>): Promise<T> {
+    const server = createServer((_req, response) => {
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify(body))
     })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    assert(address && typeof address === 'object')
+    try {
+        return await run(`http://127.0.0.1:${address.port}`)
+    } finally {
+        await new Promise<void>((resolve, reject) =>
+            server.close((error) => {
+                if (error) reject(error)
+                else resolve()
+            }),
+        )
+    }
+}
 
-    after(async () => {
-        await new Promise((resolve) => server.close(resolve))
-    })
-
-    test('a complete answer is accepted', async () => {
-        reply = { access_token: 'access', refresh_token: 'refresh', expires_in: '3600' }
-        const token = await fromCode(authUrl, 'code')
+test('OAuth code exchange accepts positive numeric string and number expiries', async () => {
+    for (const expires_in of ['3600', 3600]) {
+        const before = Date.now()
+        const token = await withResponse({ access_token: 'access', refresh_token: 'refresh', expires_in }, (url) =>
+            fromCode(url, 'code'),
+        )
         assert.equal(token.accessToken, 'access')
         assert.equal(token.refreshToken, 'refresh')
-        assert.ok(token.validUntil > Date.now())
-    })
+        assert(token.validUntil >= before + 3_600_000)
+        assert(token.validUntil <= Date.now() + 3_600_000)
+    }
+})
 
-    test('an answer carrying only an expiry is refused', async () => {
-        // It used to be accepted: the condition read (a && b && c) || typeof expires_in === 'number',
-        // and the caller got a token whose fields were undefined.
-        reply = { expires_in: 3600 }
-        await assert.rejects(fromCode(authUrl, 'code'), /OAuth2 sign-in failed/)
-    })
+test('OAuth code exchange rejects partial, malformed, and non-positive responses without exposing tokens', async () => {
+    const invalid = [
+        // No tokens at all. This one was accepted before the condition was rewritten: it read
+        // (a && b && c) || typeof expires_in === 'number', so a bare expiry produced a Token whose
+        // fields were undefined and a failure somewhere unrelated to the login.
+        { expires_in: 3600 },
+        { access_token: 'access-secret', expires_in: 3600 },
+        { refresh_token: 'refresh-secret', expires_in: 3600 },
+        { access_token: 123, refresh_token: 'refresh-secret', expires_in: 3600 },
+        { access_token: 'access-secret', refresh_token: 456, expires_in: 3600 },
+        { access_token: 'access-secret', refresh_token: 'refresh-secret', expires_in: 'not-a-number' },
+        { access_token: 'access-secret', refresh_token: 'refresh-secret', expires_in: 0 },
+        { access_token: 'access-secret', refresh_token: 'refresh-secret', expires_in: Infinity },
+        { access_token: 'access-secret', refresh_token: 'refresh-secret', expires_in: Number.MAX_VALUE },
+        null,
+    ]
 
-    test('an answer missing the refresh token is refused', async () => {
-        reply = { access_token: 'access', expires_in: 3600 }
-        await assert.rejects(fromCode(authUrl, 'code'), /OAuth2 sign-in failed/)
-    })
+    for (const response of invalid) {
+        await assert.rejects(
+            withResponse(response, (url) => fromCode(url, 'code')),
+            (error: Error) => {
+                assert.match(error.message, /invalid response/)
+                assert.doesNotMatch(error.message, /access-secret|refresh-secret/)
+                return true
+            },
+        )
+    }
+})
+
+test('OAuth refresh errors do not expose an invalid token response', async () => {
+    await assert.rejects(
+        withResponse({ access_token: 123, refresh_token: 'response-secret' }, (url) => refresh(url, 'request-secret')),
+        (error: Error) => {
+            assert.match(error.message, /invalid response/)
+            assert.doesNotMatch(error.message, /response-secret|request-secret/)
+            return true
+        },
+    )
 })
