@@ -286,6 +286,8 @@ export default abstract class ACDevice extends TLVDevice {
     filterChangedDate: number = 0
     filterInitialQueryTimeout: ReturnType<typeof setTimeout> | undefined
     filterQueryTimer: ReturnType<typeof setInterval> | undefined
+    /* A reset waiting for the query that reads the counter one last time; see the reset button. */
+    filterDoReset: boolean = false
     /* --- reservation relay state; see relayReservation --- */
     resDeadline: ReservationDeadlines = {}
     resTimer: ReturnType<typeof setInterval> | undefined
@@ -668,6 +670,12 @@ export default abstract class ACDevice extends TLVDevice {
             // if this was not the initial query just update the HA values
             this.publishFilterData()
         }
+
+        /* The answer to the query the reset button sent. Now the counter is current, clear it. */
+        if (this.filterDoReset) {
+            this.filterDoReset = false
+            this.sendFilterReset()
+        }
     }
 
     publishFilterData() {
@@ -1013,9 +1021,17 @@ export default abstract class ACDevice extends TLVDevice {
             /*  0x1f7 is not necessary for ON but does not seem to hurt either */
             write_attach: (raw) => (raw ? [TAG_MODE, TAG_FAN, TAG_TEMP_TARGET] : []),
             read_callback: (val) => {
-                // update 'mode' instead
+                /*
+                 * Update 'mode' instead.
+                 *
+                 * This is also why a hook that is already on modeChangeHooks does not belong on
+                 * powerChangeHooks: mode reads as 'off' while the unit is off and as its actual
+                 * mode otherwise, so every power change is a mode change too and a hook on both
+                 * lists runs twice for one event.
+                 */
                 this.processKeyValue(TAG_MODE, this.raw_clip_state[TAG_MODE])
 
+                /* After the mode update, in case a hook depends on it being current. */
                 const powerState = val === 'ON'
                 if (this.powerStatePrev !== powerState) for (const hook of this.powerChangeHooks) hook()
                 this.powerStatePrev = powerState
@@ -1343,7 +1359,7 @@ export default abstract class ACDevice extends TLVDevice {
 
     /*
      * What the unit is actually doing. The tag that reports it only exists on some units; the
-     * power and mode hooks recompute the action either way.
+     * mode hook recomputes the action either way, power included - see the note on that hook.
      */
     addClimateActionField(config: ClimateConfig) {
         const iduRunningTag = this.getIDUActionRunningTLVNum()
@@ -1363,9 +1379,6 @@ export default abstract class ACDevice extends TLVDevice {
             )
         }
 
-        this.powerChangeHooks.push(() => {
-            this.updateClimateAction()
-        })
         this.modeChangeHooks.push(() => {
             this.updateClimateAction()
         })
@@ -1418,7 +1431,16 @@ export default abstract class ACDevice extends TLVDevice {
                 comp: '',
                 write_xform: (val) => (val === 'PRESS' ? 1 : 0),
                 write_callback: (val) => {
-                    if (val === 1) this.sendFilterReset()
+                    if (val === 1) {
+                        /*
+                         * Query first, reset when the answer arrives. These counters are only
+                         * refreshed once a day - a query may do an EEPROM write - so resetting
+                         * straight away records a usage figure up to 24 hours short of what the
+                         * filter actually ran.
+                         */
+                        this.filterDoReset = true
+                        this.sendFilterQuery()
+                    }
                     return false
                 },
             }
@@ -1655,12 +1677,9 @@ export default abstract class ACDevice extends TLVDevice {
 
         /*
          * This value needs to be written at each power up in heat/cool mode,
-         * but in a separate message.
+         * but in a separate message. The mode hook covers power-up as well - see the power
+         * field's read callback - so registering the same write on both lists only sent it twice.
          */
-        this.powerChangeHooks.push(() => {
-            if (this.getPowerTLV() === 0) return
-            this.setProperty(name + '-', this.jetMode ? 'ON' : 'OFF')
-        })
         this.modeChangeHooks.push(() => {
             this.setProperty(name + '-', this.jetMode ? 'ON' : 'OFF')
         })
@@ -1849,17 +1868,21 @@ export default abstract class ACDevice extends TLVDevice {
             },
         })
 
-        this.powerChangeHooks.push(() => {
-            if (this.getPowerTLV() === 0) return
-            /*
-             * This value needs to be written at each power up,
-             * but in a separate message.
-             */
-            this.setProperty(name + '-', this[field_name] ? 'ON' : 'OFF')
-        })
-
+        /*
+         * This value needs to be written at each power up, but in a separate message.
+         *
+         * One list or the other, never both: a mode-dependent switch already gets its write on
+         * every power change, because power changes the mode too - see the power field's read
+         * callback. A switch that has no check_mode has no mode hook to ride, so it keeps the
+         * power one.
+         */
         if (check_mode) {
             this.modeChangeHooks.push(() => {
+                this.setProperty(name + '-', this[field_name] ? 'ON' : 'OFF')
+            })
+        } else {
+            this.powerChangeHooks.push(() => {
+                if (this.getPowerTLV() === 0) return
                 this.setProperty(name + '-', this[field_name] ? 'ON' : 'OFF')
             })
         }
