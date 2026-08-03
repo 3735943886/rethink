@@ -236,6 +236,12 @@ function connect() {
                     if (!devices[id]) devices[id] = new DeviceEntry(id, j, get('devices_body'))
                     else devices[id].update(j)
                 }
+
+                // Only the bridge knows the names, and only when a ThinQ account is linked. Decided
+                // over the whole list rather than per row: the column either says something about
+                // these appliances or it says nothing about any of them.
+                const named = Object.values(devices).some((dev) => dev.remoteState.name)
+                get('devices_table').classList.toggle('no-names', !named)
             }
 
             if (typeof json.bridge === 'object') {
