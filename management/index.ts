@@ -211,15 +211,6 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
             }
             let injectFlag = false
             let device: AnyDevice | undefined
-            /*
-             * The appliance owns its observe-only state; this only remembers whether *this* connection
-             * asked for it, so that it can be re-applied to a device object that gets replaced by a
-             * reconnect. A connection that never touched the switch must not write to it at all -
-             * having every newly opened monitor page assert its own default is how a page being opened
-             * silently lifted the block on an appliance that another connection was holding, and a
-             * command went through to the hardware.
-             */
-            let blockRequested: boolean | undefined
             const onDeviceRx = (arg: Buffer) => {
                 safeSend(ws, JSON.stringify({ rx: arg.toString('hex'), injected: injectFlag }))
             }
@@ -239,12 +230,7 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
 
                     device = dev
                     if (device) {
-                        if (device instanceof T2Device && blockRequested !== undefined)
-                            device.blockToDevice = blockRequested
-                        // Reported, never assumed: the switch shown here is the appliance's own state,
-                        // so a page that is opened or reloaded sees what is actually in force.
-                        const blockToDevice = device instanceof T2Device && device.blockToDevice
-                        safeSend(ws, JSON.stringify({ status: 'online', meta: device.meta, blockToDevice }))
+                        safeSend(ws, JSON.stringify({ status: 'online', meta: device.meta }))
                         device.on('data', onDeviceRx)
                         device.on('sendData', onDeviceTx)
                     } else {
@@ -270,24 +256,6 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 const dev = manager.allDevices[id]
 
                 try {
-                    /*
-                     * Observe-only: hold back everything the cloud addresses to this appliance, while
-                     * still reporting it here. This is how the ThinQ app's own control frames get
-                     * recorded without the appliance carrying the command out - press "start" in the
-                     * app, keep the bytes, and the machine stays put. Off by default, and it lasts
-                     * only as long as this monitor connection asks for it.
-                     */
-                    if (typeof json.blockToDevice === 'boolean') {
-                        const wanted: boolean = json.blockToDevice
-                        blockRequested = wanted
-                        if (dev instanceof T2Device) dev.blockToDevice = wanted
-                        log('MGMT', id, `observe-only ${wanted ? 'on' : 'off'}`)
-                        // Echoed from the appliance, so an "on" that reached nothing - the device is
-                        // offline, or is a thinq1 device the switch does not cover - reads as off here
-                        // rather than as a block that is not in force.
-                        ws.send(JSON.stringify({ blockToDevice: dev instanceof T2Device && dev.blockToDevice }))
-                    }
-
                     if (typeof json.sendToDevice === 'object' && dev && dev instanceof T1Device) {
                         try {
                             injectFlag = true

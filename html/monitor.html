@@ -102,17 +102,6 @@
             .monitor-controls .switch label .lever {
                 margin: 0;
             }
-
-            /*
-             * Observe only is a mode that silently swallows everything the cloud sends this appliance,
-             * and a lever nudged 20 pixels to the right is not enough of a warning for that - mistaking
-             * it for off is how a styler once took a start command for real. It wears the same red as an
-             * injected message while it is on.
-             */
-            .monitor-controls.blocking .toggle-observe {
-                background: #c04040;
-                color: white;
-            }
         </style>
         <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
         <link
@@ -141,15 +130,6 @@
         <div class="reduced_margins container flex_y flex_grow" style="overflow: hidden">
             <h4 class="header orange-text">Messages</h4>
             <div class="monitor-controls" id="monitor_controls">
-                <span
-                    class="toggle toggle-observe"
-                    title="Record what the cloud sends without letting the appliance act on it"
-                >
-                    <label for="blocktodevice">Observe only</label>
-                    <span class="switch">
-                        <label><input id="blocktodevice" type="checkbox" /> <span class="lever"></span></label>
-                    </span>
-                </span>
                 <span class="toggle">
                     <label for="autoscroll">Auto-scroll</label>
                     <span class="switch">

@@ -1,9 +1,10 @@
 // Cloud->appliance commands for the Korean washer/dryer/styler family, the counterpart to
 // monitoring_record.ts.
 //
-// These are the frames the ThinQ app itself sends. Most were recorded with rethink's observe-only
-// switch on, so pressing the app's buttons produced the bytes without any appliance carrying the
-// command out - a washer's "start" could be read off the wire with the drum standing still.
+// These are the frames the ThinQ app itself sends. Most were read off the wire while rethink held
+// them back instead of passing them on, so pressing the app's buttons produced the bytes without any
+// appliance carrying the command out - a washer's "start" recorded with the drum standing still.
+// That switch has since been removed; anything re-derived now runs on the hardware for real.
 //
 //   f0 24 <type> 01 00      short control: type 1 = power off, type 4 = pause
 //   f0 26 <payload>         start a course - or resume a paused one
@@ -54,8 +55,8 @@ export function courseControl(payload: Buffer): Buffer {
  * needs the state the appliance reports afterwards, not its acknowledgement.
  *
  * The absence of an answer is worth as much as its presence. A command that goes unanswered is one the
- * appliance never saw, and the cloud retries it three times at five-second intervals - which is exactly
- * the signature left behind by rethink's own observe-only mode holding a frame back. A frame with a
+ * appliance never saw, and the cloud retries it three times at five-second intervals - a triple in the
+ * capture with no answer between is a frame that never reached the hardware. A frame with a
  * length byte that does not match its own length is not answered either: four such went out during the
  * probe above and every one was ignored.
  */

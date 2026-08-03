@@ -38,26 +38,15 @@ describe('forwarding a cloud message to the appliance', () => {
         assert.deepEqual(sent(published)[0], PACKET)
     })
 
-    test('observe-only still holds a packet back, and still shows it', () => {
+    test('a relayed packet is reported to the monitor on its way past', () => {
         const { dev, published } = newDevice()
         const seen: string[] = []
         dev.on('sendData', (buf) => seen.push(buf.toString('hex')))
-        dev.blockToDevice = true
 
         dev.forward_clip(PACKET)
 
-        assert.deepEqual(published, [])
+        assert.deepEqual(sent(published)[0], PACKET)
         assert.deepEqual(seen, ['aa05f0dead55bb'])
-    })
-
-    test('observe-only does not hold back anything else', () => {
-        // Blocking a reply the appliance is waiting on does not make it do nothing, it makes it
-        // reconnect - and an unacknowledged report is the retransmission this change exists to stop.
-        const { dev, published } = newDevice()
-        dev.blockToDevice = true
-        dev.forward_clip(ACK)
-
-        assert.equal(published.length, 1)
     })
 
     test("rethink's own commands still go out under a mid of their own", () => {

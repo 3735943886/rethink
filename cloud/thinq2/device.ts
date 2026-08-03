@@ -35,19 +35,6 @@ export class Device extends TypedEmitter<DeviceEvents> {
      */
     onUnhandledClip?: (payload: ClipMessage) => void
 
-    /*
-     * Observe-only mode, set from the management interface. While it is on, packets addressed to the
-     * appliance are still reported to the management interface - so they are still captured, still
-     * decoded, still visible in the monitor - but are not handed to the appliance itself. That is what
-     * makes it possible to record exactly what the ThinQ app's buttons send without the machine acting
-     * on it: press "start" in the app, keep the frame, and the washer never moves.
-     *
-     * Only device packets are held back. Clip-level messages (provisioning, firmware, the replies the
-     * appliance is waiting on) still go through, because dropping those does not make the appliance
-     * do nothing - it makes it reconnect.
-     */
-    blockToDevice = false
-
     constructor(
         readonly broker: Broker,
         readonly topic: string,
@@ -75,15 +62,9 @@ export class Device extends TypedEmitter<DeviceEvents> {
      * So nothing is rewritten in either case - the bridge is a proxy, and this is what proxying means.
      */
     forward_clip(payload: ClipEnvelope) {
-        // Packets still pass the observe-only gate, so a bridged appliance can be watched taking
-        // orders from the app without carrying them out.
-        if (payload.cmd === 'packet' && typeof payload.data === 'string') {
+        // Reported to the monitor on the way past, so a relayed packet is still captured there.
+        if (payload.cmd === 'packet' && typeof payload.data === 'string')
             this.emit('sendData', Buffer.from(payload.data, 'hex'))
-            if (this.blockToDevice) {
-                log('DEV', this.id, `observe-only: held back ${payload.data}`)
-                return
-            }
-        }
 
         this.publish(JSON.stringify(payload))
     }
@@ -96,12 +77,7 @@ export class Device extends TypedEmitter<DeviceEvents> {
     }
 
     send_packet(buf: Buffer) {
-        // Reported before the block is applied, so a held-back packet still reaches the monitor.
         this.emit('sendData', buf)
-        if (this.blockToDevice) {
-            log('DEV', this.id, `observe-only: held back ${buf.toString('hex')}`)
-            return
-        }
         this.send('packet', 1, buf.toString('hex'))
     }
 }
