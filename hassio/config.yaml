@@ -11,7 +11,7 @@ arch:
     - armv7
 
 # Container image & init
-image: ghcr.io/anszom/rethink
+image: ghcr.io/stkang/3735943886_rethink_hassio
 init: true
 
 # Startup / lifecycle
