@@ -23,6 +23,7 @@ describe('loadHassioConfig', () => {
     test('an explicit mqtt_url is used verbatim and bridge maps to a state dir', async () => {
         const path = write('explicit.json', {
             hostname: 'my.lan',
+            advertise_requested_host: true,
             bridge: true,
             mqtt_url: 'mqtt://10.0.0.5:1883',
             mqtt_user: 'u',
@@ -36,6 +37,7 @@ describe('loadHassioConfig', () => {
         assert.equal(c.homeassistant.mqtt_url, 'mqtt://10.0.0.5:1883')
         assert.equal(c.homeassistant.mqtt_user, 'u')
         assert.equal(c.homeassistant.mqtt_pass, 'p')
+        assert.equal(c.advertise_requested_host, true)
         assert.equal(c.https_port, 8443)
         assert.equal(c.mqtts_port, 8885) // default applied
         assert.equal(c.management_port, 44401)
@@ -51,6 +53,7 @@ describe('loadHassioConfig', () => {
         assert.equal(c.homeassistant.mqtt_url, 'mqtt://localhost:1883')
         assert.equal(c.homeassistant.discovery_prefix, 'homeassistant')
         assert.equal(c.homeassistant.rethink_prefix, 'rethink')
+        assert.equal(c.advertise_requested_host, false)
         assert.equal(c.thinq1_https_port, undefined)
         assert.equal(c.thinq1_port, undefined)
         assert.equal(c.bridge, undefined)

@@ -48,6 +48,7 @@ options:
     hostname: rethink.lan
     discovery_prefix: homeassistant
     rethink_prefix: rethink
+    advertise_requested_host: false
     bridge: false
     mqtt_url: ''
     mqtt_user: ''
@@ -69,6 +70,7 @@ schema:
     hostname: str
     discovery_prefix: str
     rethink_prefix: str
+    advertise_requested_host: bool
     # Enable ThinQ cloud bridge mode (keeps the official LG app working).
     bridge: bool
     # Leave mqtt_url empty to auto-use the Home Assistant MQTT service.

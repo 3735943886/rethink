@@ -13,6 +13,7 @@ type Options = {
     hostname?: string
     discovery_prefix?: string
     rethink_prefix?: string
+    advertise_requested_host?: boolean
     bridge?: boolean
     mqtt_url?: string
     mqtt_user?: string
@@ -64,6 +65,7 @@ export async function loadHassioConfig(optionsPath: string = HASSIO_OPTIONS): Pr
 
     const config: RawConfig = {
         hostname: opts.hostname ?? 'rethink.lan',
+        advertise_requested_host: opts.advertise_requested_host ?? false,
         homeassistant: {
             mqtt_url: mqtt.url,
             discovery_prefix: opts.discovery_prefix ?? 'homeassistant',
@@ -83,5 +85,6 @@ export async function loadHassioConfig(optionsPath: string = HASSIO_OPTIONS): Pr
     }
 
     if (opts.bridge) config.bridge = { storage_path: 'state' }
+    console.log('Home Assistant add-on config loaded:', JSON.stringify(config, null, 2))
     return config
 }
