@@ -344,7 +344,7 @@ export default class Device extends AABBDevice {
                         name: 'Cycle energy',
                         device_class: 'energy',
                         unit_of_measurement: 'Wh',
-                        state_class: 'measurement', // per cycle, not a lifetime total
+                        state_class: 'total_increasing', // climbs during the cycle, resets to 0 at the next
                     },
                     error: {
                         platform: 'binary_sensor',
