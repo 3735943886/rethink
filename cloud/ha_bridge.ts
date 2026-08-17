@@ -86,6 +86,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
 
 class Bridge {
     haDevices = new Map<string, HADevice>()
+    pendingDropTimers = new Map<string, ReturnType<typeof setTimeout>>()
     /*
      * The reservation store is optional: a driver that relays the LG app's on/off reservation
      * simply runs it in memory when there is nowhere to persist deadlines to, which is what
@@ -94,6 +95,7 @@ class Bridge {
     constructor(
         readonly HA: Connection,
         readonly reservationStore?: ReservationStore,
+        readonly disconnectGraceMs = 2000,
     ) {
         HA.on('discovery', () => {
             this.haDevices.forEach((ha) => ha.publishConfig())
@@ -106,8 +108,6 @@ class Bridge {
 
     newDevice(thinqdev: AnyDevice) {
         const meta = thinqdev.meta
-        const oldDevice = this.haDevices.get(thinqdev.id)
-        if (oldDevice) oldDevice.drop()
 
         let hadevice: HADevice | undefined
 
@@ -132,6 +132,22 @@ class Bridge {
         )
             hadevice.setReservationStore(this.reservationStore)
 
+        const pendingDropTimer = this.pendingDropTimers.get(thinqdev.id)
+        if (pendingDropTimer) {
+            clearTimeout(pendingDropTimer)
+            this.pendingDropTimers.delete(thinqdev.id)
+        }
+
+        /*
+         * A ThinQ appliance may open its replacement MQTT connection before the old one's close
+         * event fires - notably right after a washer powers itself off and back on. The new
+         * handler publishes online during start() below, so dropping the superseded handler here
+         * (or leaving its pending drop timer running) would only cost every entity a brief
+         * unavailable -> available flicker for no reason: the map entry is about to be replaced.
+         * Its timers/listeners still need releasing though - only the offline publish is skipped.
+         */
+        this.haDevices.get(thinqdev.id)?.cancelPendingWork()
+
         this.haDevices.set(thinqdev.id, hadevice)
         thinqdev.on('close', () => this.dropDevice(hadevice))
 
@@ -140,10 +156,19 @@ class Bridge {
     }
 
     dropDevice(ha: HADevice) {
-        if (this.haDevices.get(ha.id) === ha) {
-            this.haDevices.delete(ha.id)
-            ha.drop()
-        }
+        if (this.haDevices.get(ha.id) !== ha) return
+
+        const previous = this.pendingDropTimers.get(ha.id)
+        if (previous) clearTimeout(previous)
+
+        const timer = setTimeout(() => {
+            if (this.haDevices.get(ha.id) === ha) {
+                this.haDevices.delete(ha.id)
+                ha.drop()
+            }
+            if (this.pendingDropTimers.get(ha.id) === timer) this.pendingDropTimers.delete(ha.id)
+        }, this.disconnectGraceMs)
+        this.pendingDropTimers.set(ha.id, timer)
     }
 }
 

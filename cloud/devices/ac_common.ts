@@ -461,7 +461,7 @@ export default abstract class ACDevice extends TLVDevice {
         this.resTimer = setInterval(() => this.reservationTick(), 60 * 1000)
     }
 
-    drop() {
+    cancelPendingWork() {
         /* clearTimeout / clearInterval ignore undefined, so no guard is needed */
         clearTimeout(this.tlvBlacklistDisableTimer)
         this.tlvBlacklistDisableTimer = undefined
@@ -478,7 +478,7 @@ export default abstract class ACDevice extends TLVDevice {
             this.resCloudWriteHook = undefined
         }
 
-        super.drop()
+        super.cancelPendingWork()
     }
 
     /*

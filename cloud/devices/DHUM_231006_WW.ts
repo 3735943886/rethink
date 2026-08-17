@@ -918,12 +918,12 @@ export default class Device extends TLVDevice {
         }, WRITE_COALESCE_MS)
     }
 
-    drop() {
+    cancelPendingWork() {
         if (this.writeFlushTimer !== undefined) {
             clearTimeout(this.writeFlushTimer)
             this.writeFlushTimer = undefined
         }
-        super.drop()
+        super.cancelPendingWork()
     }
 
     /* Used when a brightness of 0 arrives: HA means "off", and the appliance has a tag for it. */

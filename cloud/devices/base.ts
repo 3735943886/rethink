@@ -40,8 +40,18 @@ export default class HADevice {
     }
 
     drop() {
+        this.cancelPendingWork()
         this.HA.publishProperty(this.id, 'availability', 'offline')
     }
+
+    /*
+     * Releases timers and listeners a subclass is holding, without touching HA's availability
+     * state. drop() always calls this on its way to publishing offline, but it also runs on its
+     * own when a device is superseded by its own replacement before its close event fires - see
+     * Bridge.newDevice() - where publishing offline would only be a flicker, since the
+     * replacement is about to publish online under the same id.
+     */
+    cancelPendingWork() {}
 
     start() {}
 
