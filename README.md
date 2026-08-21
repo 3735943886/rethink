@@ -31,11 +31,14 @@ The following appliances are currently supported in rethink:
     - 👍 F4X7511TWS (VCDWL2QEUK), Front-Load Washing Machine - mostly working
     - 🫤 WT7300CW - preliminary support
     - 👍 WM3900HBA (F3L2CYU\_\_), Front-Load Washing Machine - mostly working
+    - 👍 FV1413H2B, Washing Machine - mostly working,
+    - 👍 F3L7CYK5W_US_WIFI, Front-Load Washing Machine - mostly working
     - 👍 F24VDD, AI DD Front-Load Washing Machine (Korea) - status reporting, course selection, start/pause/power off
     - 👍 Pd0F_F, 2nd Mini Washer pedestal drawer (Korea) - status reporting, course selection, start/pause/power off
 - Dryers:
     - 🫤 DLE7300WE - preliminary support
     - 👍 DLEX3900B (RV13B6BSD_D_US_WIFI), Electric Dryer - mostly working
+    - 👍 RV13B6ES_D_US_WIFI, Electric Dryer - mostly working
     - 👍 RH14_N_KR, 14 kg Heat-Pump Dryer (Korea) - status reporting, course selection, start/pause/power off
 - WashTowers (combined washer+dryer):
     - 👍 WKEX200HBA (WTL_FXU_BDV_NA_01), WashTower - mostly working
@@ -43,6 +46,10 @@ The following appliances are currently supported in rethink:
     - 👍 S3BF_POD_DN4, LG Styler (Korea) - status reporting, course selection, start/pause/power off
 - Water:
     - 👍 1WPU4CIGCR\_\_2, PuriCare water purifier (Korea) - status reporting, dispensed water, settings
+- Dehumidifiers
+    - 👍 MD19GQGE0, Smart Dehumidifier - mostly working
+- Range Hoods:
+    - 👍 HCED3015D (STUDIO_HOOD), Generic identifier and probably works with multiple models. Working.
 
 The supported appliances can be used "out of the box" with HomeAssistant or another compatible MQTT consumer.  
 Appliances not listed above can still be used with the bridge mode, but they will not be translated to MQTT. Contributions are welcome!

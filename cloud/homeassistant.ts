@@ -247,6 +247,7 @@ export type HumidifierComponent = ComponentInfo & {
     modes?: string[]
     payload_on?: string
     payload_off?: string
-    // per-attribute topics (command_topic/state_topic for power, target_humidity_*,
-    // current_humidity_topic, mode_*) are attached dynamically by TLVDevice.addField
+    current_humidity_topic?: string
+    // remaining per-attribute topics (command_topic/state_topic for power, target_humidity_*,
+    // mode_*) are attached dynamically by TLVDevice.addField
 }

@@ -8,6 +8,7 @@ import Dev_2REF11EBIVPC4 from './devices/2REF11EBIVPC4'
 import Dev_2RES1VE61NFA2 from './devices/2RES1VE61NFA2'
 import Dev_2REB1GLVB1__2 from './devices/2REB1GLVB1__2'
 import Dev_2RES1VE600FWC from './devices/2RES1VE600FWC'
+import Dev_STUDIO_HOOD from './devices/STUDIO_HOOD'
 import Y_V8_Y___W_B32QEUK from './devices/Y_V8_Y___W.B32QEUK'
 import F_V8_Y___W_B_2QEUK from './devices/F_V8_Y___W.B_2QEUK'
 import Y_V8_F___W_B_2QEUK from './devices/Y_V8_F___W.B_2QEUK'
@@ -19,6 +20,7 @@ import CST_170004_WW from './devices/CST_170004_WW'
 import T1789EFH_F from './devices/T1789EFH_F'
 import RV13U6AM8W_D_US_WIFI from './devices/RV13U6AM8W_D_US_WIFI'
 import F3L2CYU__ from './devices/F3L2CYU__'
+import F3L7CYK5W_US_WIFI from './devices/F3L7CYK5W_US_WIFI'
 import RV13B6BSD_D_US_WIFI from './devices/RV13B6BSD_D_US_WIFI'
 import WBEY3GT from './devices/WBEY3GT'
 import AIR_910604_WW from './devices/AIR_910604_WW'
@@ -30,6 +32,7 @@ import F24VDD from './devices/F24VDD'
 import RH14_N_KR from './devices/RH14_N_KR'
 import S3BF_POD_DN4 from './devices/S3BF_POD_DN4'
 import Pd0F_F from './devices/Pd0F_F'
+import RV13B6ES_D_US_WIFI from './devices/RV13B6ES_D_US_WIFI'
 import WTL_FXU_BDV_NA_01 from './devices/WTL_FXU_BDV_NA_01'
 import { Device as T1Device } from './thinq1/device'
 import { Device as T2Device } from './thinq2/device'
@@ -59,6 +62,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     ['2RES1VE61NFA2']: Dev_2RES1VE61NFA2,
     ['2REB1GLVB1__2']: Dev_2REB1GLVB1__2,
     ['2RES1VE600FWC']: Dev_2RES1VE600FWC,
+    ['STUDIO_HOOD']: Dev_STUDIO_HOOD,
     ['Y_V8_Y___W.B32QEUK']: Y_V8_Y___W_B32QEUK,
     ['F_V7_Y___W.B_2QEUK']: F_V8_Y___W_B_2QEUK, // NOTE: we reuse F_V8_Y___W_B_2QEUK as the models appear to be compatible
     ['F_V8_Y___W.B_2QEUK']: F_V8_Y___W_B_2QEUK,
@@ -66,10 +70,14 @@ const t2deviceTypes: Record<string, T2Factory> = {
     ['F_V__Y___W.B_2QEUK']: F_V8_Y___W_B_2QEUK, // NOTE: we reuse F_V8_Y___W_B_2QEUK as the models appear to be compatible
     ['VCDWL2QEUK']: VCDWL2QEUK, // LG F4X7511TWS front-load washer (matched on modelId VCDWL2QEUK)
     ['F_V__F___W.B_1QEUK']: F_V__F___W_B_1QEUK,
+    // FV1413H2BA front-load washer SoftAP model F_VA_F___W.B__QEUK (deviceType 201)
+    ['F_VA_F___W.B__QEUK']: F_V__F___W_B_1QEUK,
     ['F_VB_F___W.B_2QEUK']: F_VB_F___W_B_2QEUK, // LG CV74J7S2QA washer/dryer combo
     ['T1789EFH_F']: T1789EFH_F, // LG WT7300CW top-loading washer
     ['RV13U6AM8W_D_US_WIFI']: RV13U6AM8W_D_US_WIFI, // LG DLE7300WE dryer
     ['F3L2CYU__']: F3L2CYU__, // LG front-load washer
+    ['F3L7CYK5W_US_WIFI']: F3L7CYK5W_US_WIFI, // LG front-load washer, same record layout as F3L2CYU__ but
+    // a different course table and two extra option bits, so it needs its own handler rather than an alias
     ['RV13B6BSD_D_US_WIFI']: RV13B6BSD_D_US_WIFI, // LG electric dryer
     WBEY3GT, // LG electric range/cooktop (deviceType 303), status only
     AIR_910604_WW, // LG air purifier (deviceType 402); same TLV family, fan platform
@@ -81,6 +89,8 @@ const t2deviceTypes: Record<string, T2Factory> = {
     RH14_N_KR, // LG heat-pump dryer sold in Korea (deviceType 202), status only
     S3BF_POD_DN4, // LG Styler clothing care cabinet (deviceType 203), status only
     Pd0F_F, // LG 2nd Mini Washer pedestal drawer (deviceType 201), status only
+    ['RV13B6ES_D_US_WIFI']: RV13B6ES_D_US_WIFI, // LG electric dryer, same frame layout as RV13B6BSD but
+    // Wrinkle Care sits in a different bitfield, so it needs its own handler rather than an alias
     WTL_FXU_BDV_NA_01, // LG WashTower (WKEX200HBA), washer and dryer on one device
 }
 
