@@ -1,5 +1,8 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Connection } from '@/cloud/homeassistant'
 import { KeyedDebounce } from '@/util/debounce'
 import { enableMockTimers, tickMockTimers } from '@/tests/helpers/timers'
@@ -131,5 +134,66 @@ describe('KeyedDebounce', () => {
         const debounce = new KeyedDebounce()
         debounce.cancel('never-deferred')
         assert.ok(!debounce.isPending('never-deferred'))
+    })
+})
+
+describe('persistent device state', () => {
+    function makeConnectionWithStorage(storage_path?: string) {
+        const con = Object.create(Connection.prototype) as Connection
+        Object.assign(con, { config: { rethink_prefix: 'rethink', storage_path } })
+        return con
+    }
+
+    test('a device with no prior state reads back empty', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'rethink-ha-state-'))
+        try {
+            const con = makeConnectionWithStorage(dir)
+            assert.deepEqual(con.getPersistentDeviceState(ID), {})
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    test('a written state round-trips through get', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'rethink-ha-state-'))
+        try {
+            const con = makeConnectionWithStorage(dir)
+            con.setPersistentDeviceState(ID, { totalEnergy: 42 })
+            assert.deepEqual(con.getPersistentDeviceState(ID), { totalEnergy: 42 })
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    test('two devices do not collide on the same file', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'rethink-ha-state-'))
+        try {
+            const con = makeConnectionWithStorage(dir)
+            con.setPersistentDeviceState('device-a', { totalEnergy: 1 })
+            con.setPersistentDeviceState('device-b', { totalEnergy: 2 })
+            assert.deepEqual(con.getPersistentDeviceState('device-a'), { totalEnergy: 1 })
+            assert.deepEqual(con.getPersistentDeviceState('device-b'), { totalEnergy: 2 })
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    test('a corrupt state file is treated as empty rather than thrown', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'rethink-ha-state-'))
+        try {
+            const con = makeConnectionWithStorage(dir)
+            con.setPersistentDeviceState(ID, { totalEnergy: 1 })
+            const [file] = readdirSync(dir)
+            writeFileSync(join(dir, file), 'not json', 'utf-8')
+            assert.deepEqual(con.getPersistentDeviceState(ID), {})
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    test('without a configured storage_path, state is not persisted', () => {
+        const con = makeConnectionWithStorage(undefined)
+        con.setPersistentDeviceState(ID, { totalEnergy: 1 })
+        assert.deepEqual(con.getPersistentDeviceState(ID), {})
     })
 })

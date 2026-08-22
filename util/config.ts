@@ -42,6 +42,7 @@ export type HAConfig = {
     rethink_prefix: string
     mqtt_user: string
     mqtt_pass: string
+    storage_path?: string
 }
 
 export type CA = {

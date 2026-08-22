@@ -14,6 +14,9 @@
     "rethink_prefix": "rethink", // rethink topics will be prefixed with this
     "mqtt_user": "",
     "mqtt_pass": ""
+    // Lets a device driver persist derived state (e.g. an accumulated energy total) across
+    // restarts instead of resetting to zero. Uncomment to enable:
+    // "storage_path": "./ha-state"
   },
 
   "ca_key_file": "ca.key", // will be created on first run if necessary
