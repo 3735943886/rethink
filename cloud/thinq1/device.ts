@@ -11,38 +11,59 @@ type ConWithExtra = Connection & {
 
 type DeviceEvents = {
     data: (packet: Buffer) => void
+    response: (body: Record<string, unknown>) => void
     sendData: (body: object) => void
     close: () => void
 }
 
+// Some ThinQ 1 appliances (observed on air purifiers) open a second RTI socket for the same
+// device id alongside the first instead of replacing it. Both stay under this one Device so
+// neither socket is mistaken for a stale reconnect; outbound commands go out the most recently
+// added (and presumably still-live) socket.
 export class Device extends TypedEmitter<DeviceEvents> {
     readonly platform = 'thinq1'
 
     lastReport: Buffer | undefined
+    private readonly connections = new Set<ConWithExtra>()
+    private activeConnection: ConWithExtra | undefined
 
     constructor(
-        readonly con: ConWithExtra,
+        con: ConWithExtra,
         readonly id: string,
         readonly meta: Metadata,
     ) {
         super()
+        this.addConnection(con)
+    }
+
+    addConnection(con: ConWithExtra) {
+        if (this.connections.has(con)) return
+
+        this.connections.add(con)
+        this.activeConnection = con
         con.deviceObj = this
         con.on('status', (packet) => {
             this.lastReport = packet
             this.emit('data', packet)
         })
+        con.on('response', (body) => this.emit('response', body))
         con.on('error', console.log)
         con.on('close', () => {
             if (con.deviceObj === this) {
-                this.emit('close')
                 con.deviceObj = undefined
+                this.connections.delete(con)
+                if (this.activeConnection === con) {
+                    const remainingConnections = Array.from(this.connections)
+                    this.activeConnection = remainingConnections[remainingConnections.length - 1]
+                }
+                if (this.connections.size === 0) this.emit('close')
             }
         })
     }
 
     send(body: object) {
         this.emit('sendData', body)
-        this.con.json({
+        this.activeConnection?.json({
             Header: { 'x-lgedm-deviceId': this.id },
             Body: {
                 ...body,
@@ -58,8 +79,8 @@ type DeviceAcceptorEvents = {
 }
 
 export class DeviceAcceptor extends TypedEmitter<DeviceAcceptorEvents> {
-    connectionsById: Record<string, Connection> = {}
-    constructor() {
+    devicesById: Record<string, Device> = {}
+    constructor(readonly metadataFor: (id: string) => Metadata | undefined = getDeviceMetadata) {
         super()
     }
 
@@ -67,30 +88,31 @@ export class DeviceAcceptor extends TypedEmitter<DeviceAcceptorEvents> {
         const con = new Connection(socket) as ConWithExtra
         con.on('error', () => {}) // ignore errors at this stage
         con.on('init', (deviceId) => {
-            console.log('here', deviceId)
-            const meta = getDeviceMetadata(deviceId)
+            const meta = this.metadataFor(deviceId)
             if (!meta) {
                 console.warn(`device ${deviceId} metadata not known, send HTTP POST first!`)
                 con.destroy()
                 return
             }
 
-            if (this.connectionsById[deviceId]) {
-                console.warn(`device ${deviceId} already connected, dropping the old one`)
-                this.connectionsById[deviceId].destroy()
+            const existingDevice = this.devicesById[deviceId]
+            if (existingDevice) {
+                console.log(`device ${deviceId} opened an additional connection`)
+                con.removeAllListeners('error')
+                existingDevice.addConnection(con)
+                return
             }
 
-            this.connectionsById[deviceId] = con
-
-            con.on('close', () => {
-                if (this.connectionsById[deviceId] === con) {
-                    delete this.connectionsById[deviceId]
+            con.removeAllListeners('error')
+            const dev = new Device(con, deviceId, meta)
+            this.devicesById[deviceId] = dev
+            dev.on('close', () => {
+                if (this.devicesById[deviceId] === dev) {
+                    delete this.devicesById[deviceId]
                     this.emit('dropDevice', deviceId)
                 }
             })
-            con.removeAllListeners('error')
 
-            const dev = new Device(con, deviceId, meta)
             this.emit('newDevice', dev)
         })
     }

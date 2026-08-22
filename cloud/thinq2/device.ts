@@ -11,6 +11,8 @@ import { Metadata } from '../thinq'
 
 type DeviceEvents = {
     data: (packet: Buffer) => void
+    // Kept in the shared device event surface; ThinQ 2 currently does not emit ThinQ 1 response envelopes.
+    response: (body: Record<string, unknown>) => void
     sendData: (buf: Buffer) => void
     close: () => void
 }
