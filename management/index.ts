@@ -164,6 +164,22 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
             }),
         )
 
+        app.get(
+            '/bridge/:deviceId/modeljson',
+            asyncHandler(async (req, res) => {
+                try {
+                    const { modelName, modelJson } = await bridge.getModelJson(req.params.deviceId)
+                    // the model name comes from the device, don't let it break out of the header
+                    const fileName = modelName.replace(/[^A-Za-z0-9._-]/g, '_') || 'model'
+                    res.setHeader('Content-Type', 'application/json')
+                    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.json"`)
+                    res.end(modelJson)
+                } catch (err) {
+                    res.status(500).end(`${err}`)
+                }
+            }),
+        )
+
         app.post(
             '/bridge/:deviceId/disable',
             asyncHandler(async (req, res) => {

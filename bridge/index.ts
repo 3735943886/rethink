@@ -159,6 +159,22 @@ export class Bridge extends TypedEmitter<BridgeEvents> {
         this.#stop(id)
     }
 
+    // Fetches the modelJSON of a device that is registered with the ThinQ cloud, ie. one that
+    // bridge mode has been enabled for.
+    async getModelJson(id: string) {
+        const creds = this.state.getCredentials()
+        if (!creds) throw new Error('Not logged in')
+
+        const dev = this.manager.allDevices[id]
+        if (!dev) throw new Error('Unknown device')
+
+        if (!this.bridgedDevices.has(id)) throw new Error('Bridge mode is not enabled for this device')
+
+        const client = new ThinqClient(creds.env)
+        await client.auth(creds.refreshToken)
+        return { modelName: dev.meta.modelName, modelJson: await client.getModelJson(id, dev.meta.modelName) }
+    }
+
     isLoggedIn() {
         return !!this.state.getCredentials()
     }

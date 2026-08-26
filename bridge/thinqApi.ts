@@ -97,6 +97,11 @@ type HomeResponse = {
 
 type OtpResponse = { otp: string; publicKey: string }
 
+type ModelJsonResponse = {
+    modelJsonUri: string
+    modelJsonVer?: string
+}
+
 export type Environment = {
     countryCode: string
 }
@@ -260,6 +265,23 @@ export class Client {
                 throw err
             }
         }
+    }
+
+    // The modelJSON describes the capabilities of a device model (field layouts, enum values,
+    // course tables). The descriptor call requires a device registered in the current account,
+    // but the URI it returns is a plain, time-limited link that needs no authentication.
+    async getModelJson(deviceId: string, modelName: string) {
+        const { thinq2Uri } = await this.gateway
+        const url = new URL(`${thinq2Uri}/service/application/modeljson`)
+        url.searchParams.set('deviceId', deviceId)
+        url.searchParams.set('modelName', modelName)
+
+        const { modelJsonUri } = await apiFetch<ModelJsonResponse>(url.toString(), { headers: this.headers })
+
+        const resp = await fetch(modelJsonUri)
+        if (!resp.ok) throw new Error(`Can't download the modelJSON: HTTP ${resp.status}`)
+
+        return await resp.text()
     }
 
     async getDeviceStatus(deviceId: string) {
