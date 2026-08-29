@@ -107,6 +107,44 @@ describe('FirmwareHosts', () => {
         assert.deepEqual(hosts.all(), [])
     })
 
+    test('confirmLocal makes a host immune to note(), even for a URL naming it directly', () => {
+        const hosts = new FirmwareHosts()
+        hosts.confirmLocal('kic-common.lgthinq.com')
+        hosts.note('https://kic-common.lgthinq.com/some/path')
+
+        assert.ok(!hosts.has('kic-common.lgthinq.com'))
+        assert.deepEqual(hosts.all(), [])
+    })
+
+    test('confirmLocal makes a host immune to noteUrlsIn too', () => {
+        const hosts = new FirmwareHosts()
+        hosts.confirmLocal('kic-common.lgthinq.com')
+        hosts.noteUrlsIn({ cmd: 'whatever', data: { url: 'https://kic-common.lgthinq.com/x' } })
+
+        assert.ok(!hosts.has('kic-common.lgthinq.com'))
+    })
+
+    test('confirmLocal evicts a host note() already (mis)added, the incident this exists for', () => {
+        const hosts = new FirmwareHosts()
+        // A caller that was never going to trust rethink's CA rejects the handshake, and the
+        // reactive tlsClientError path misreads that as a firmware host - exactly what happened to
+        // kic-common.lgthinq.com in production. A later real request from a client that does trust
+        // it (proof the host is actually served locally) must undo that, not just prevent new ones.
+        hosts.note('https://kic-common.lgthinq.com/')
+        assert.ok(hosts.has('kic-common.lgthinq.com'))
+
+        hosts.confirmLocal('kic-common.lgthinq.com')
+        assert.ok(!hosts.has('kic-common.lgthinq.com'))
+    })
+
+    test('confirmLocal does not affect other hosts', () => {
+        const hosts = new FirmwareHosts()
+        hosts.note(REAL_URL)
+        hosts.confirmLocal('kic-common.lgthinq.com')
+
+        assert.ok(hosts.has('objectcontent.lgthinq.com'))
+    })
+
     test('two registries do not share state', () => {
         const a = new FirmwareHosts()
         const b = new FirmwareHosts()

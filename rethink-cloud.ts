@@ -116,6 +116,10 @@ function t2setup(manager: DeviceManager, firmwareHosts: FirmwareHosts) {
 
     app.use(function (req, res, next) {
         log('HTTPS', req.hostname, req.url)
+        // Getting this far means a client completed a TLS handshake against a certificate issued
+        // for this name and sent a real request - proof rethink answers it, which the passthrough
+        // paths below must never override for this name again. See firmware.ts on #confirmedLocal.
+        firmwareHosts.confirmLocal(req.hostname)
         next()
     })
 

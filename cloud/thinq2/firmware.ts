@@ -17,6 +17,13 @@
 // handshake before sending a request, because it wanted a real root, not ours - which needs no cmd
 // or field to be spotted at all, only for the appliance to have tried and failed once.
 //
+// Both of those are inferences from a single failure, and a single failure is not always what it
+// looks like - a caller that was never going to accept rethink's CA in the first place (nothing
+// pins it but an appliance that fetched it from /route/certificate) produces the identical
+// rejection on a host rethink has no business ever passing through. #confirmedLocal in this file
+// exists to make that mistake impossible to repeat for a host proven to work locally, whatever
+// noteUrlsIn or the reactive path later think they saw.
+//
 // See cloud/thinq2/sni-passthrough for what is done with it.
 
 import log from '@/util/logging'
@@ -30,9 +37,28 @@ export class FirmwareHosts {
     // puts right.
     #hosts = new Set<string>()
 
+    // Hosts rethink is known to answer itself - proven by a client actually completing a request
+    // against the certificate issued for it, not merely by a certificate having been minted (an
+    // appliance, or anything else, can still reject that cert). This exists because of an incident:
+    // kic-common.lgthinq.com - the shared API host practically every appliance and the real ThinQ
+    // app itself talks to - got one rejected handshake (an unrelated caller, not pinned to rethink's
+    // CA, most likely) that the reactive path in note() below misread as "wants a real root," and
+    // passed the whole host through from then on. That host is exactly the one this set exists to
+    // protect: it must never be added to #hosts, no matter what evidence turns up later, because a
+    // false positive here is not one broken download - it is every appliance's control breaking at
+    // once. See rethink-cloud.ts for where this gets marked true.
+    #confirmedLocal = new Set<string>()
+
+    /** Record that a client has completed a real request against a certificate issued for `host`. */
+    confirmLocal(host: string) {
+        this.#confirmedLocal.add(host)
+        this.#hosts.delete(host)
+    }
+
     /**
      * Register the host of a firmware URL the cloud has just handed an appliance. Anything that is
-     * not a parseable http(s) URL is ignored.
+     * not a parseable http(s) URL is ignored, and so is a host already proven to work when rethink
+     * answers it directly - see #confirmedLocal above.
      */
     note(downloadUrl: unknown) {
         if (typeof downloadUrl !== 'string') return
@@ -43,6 +69,11 @@ export class FirmwareHosts {
             if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return
             host = parsed.hostname
         } catch {
+            return
+        }
+
+        if (this.#confirmedLocal.has(host)) {
+            log('status', `refusing to pass ${host} through - rethink has already answered it directly`)
             return
         }
 
