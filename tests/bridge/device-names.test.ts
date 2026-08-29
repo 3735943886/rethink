@@ -9,7 +9,8 @@ import type { BridgeState, Credentials } from '@/bridge/state'
 function state(credentials?: Credentials): BridgeState {
     let creds = credentials
     return {
-        getCredentials: () => creds,
+        // return a fresh object on each call
+        getCredentials: () => (creds ? { ...creds } : undefined),
         setCredentials: (value) => {
             creds = value
         },
