@@ -7,10 +7,15 @@
 // and the connection is dropped mid-handshake - before there is any request to answer.
 //
 // Those connections have to reach the real server instead, and to route one, rethink has to know
-// the name belongs to firmware. It is never told directly, and hardcoding a CDN would only hold
-// for the one region it was read off. It does not need to be told: the cloud names the address in
-// the startFota it sends the appliance, and that passes through the bridge on the way down, so the
-// host that is about to be asked for is the host that gets registered here.
+// the name belongs to a download. Hardcoding a CDN would only hold for the one region it was read
+// off, and there is more than one cmd shape that hands an appliance a URL to fetch on its own -
+// startFota is the original one, but SOTA app content (osp_command/osp_report) does the same thing
+// under a field this was never told the name of, and likely differs by cmd or region. So this is
+// learned two ways: proactively, by noteUrlsIn scanning every cloud->device message for anything
+// that parses as an http(s) URL, whatever cmd or field carried it; and reactively, when a name
+// terminated here gets the exact rejection a firmware host produces - the appliance resets the
+// handshake before sending a request, because it wanted a real root, not ours - which needs no cmd
+// or field to be spotted at all, only for the appliance to have tried and failed once.
 //
 // See cloud/thinq2/sni-passthrough for what is done with it.
 

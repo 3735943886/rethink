@@ -135,8 +135,8 @@ function t2setup(manager: DeviceManager, firmwareHosts: FirmwareHosts) {
         res.end('')
     })
 
-    // Not every connection arriving on 443 is one rethink should answer. A firmware download is
-    // checked against the appliance's built-in roots, not the CA it pinned from us, so
+    // Not every connection arriving on 443 is one rethink should answer. A firmware or SOTA content
+    // download is checked against the appliance's built-in roots, not the CA it pinned from us, so
     // impersonating the CDN cannot work - the appliance drops the handshake before it ever sends a
     // request. Decide from the ClientHello: names rethink serves are terminated here as before,
     // firmware hosts are spliced to the real server so the appliance validates against it directly.
@@ -147,6 +147,20 @@ function t2setup(manager: DeviceManager, firmwareHosts: FirmwareHosts) {
             (socket) => httpsServer.emit('connection', socket),
         ),
     ).listen(config.https_port.bind, config.https_port.address)
+
+    // firmwareHosts.noteUrlsIn (see the bridge) catches most of these before the appliance ever
+    // connects, but it depends on spotting the right field in a cloud message, and there is no
+    // fixed list of which cmd carries a download URL. As a catch-all that needs no such guess: a
+    // name terminated here that the appliance immediately resets - exactly the firmware-download
+    // symptom this file's passthrough comment describes - is proof the appliance wanted a real
+    // root, not ours. Note it too, so its retry (appliances do retry) gets passed through instead.
+    httpsServer.on('tlsClientError', (err, socket) => {
+        // Not in @types/node, but set by the SNI callback that already ran before this fires.
+        const name = (socket as unknown as { servername?: string }).servername
+        if (!name) return
+        log('HTTPS', 'passthrough', `${name} reset the local handshake (${err.message}); passing through next time`)
+        firmwareHosts.note(`https://${name}/`)
+    })
 
     // internal MQTT broker
     const broker = new Broker()
