@@ -80,6 +80,14 @@ export default class Device extends AABBDevice {
                         state_topic: '$this/door',
                         name: 'Door',
                     },
+                    smart_care: {
+                        platform: 'switch',
+                        unique_id: '$deviceid-smart_care',
+                        state_topic: '$this/smart_care',
+                        command_topic: '$this/smart_care/set',
+                        icon: 'mdi:shield-check',
+                        name: 'Smart Care+',
+                    },
                 },
             }),
         )
@@ -108,10 +116,11 @@ export default class Device extends AABBDevice {
 
     processStatus(curStatus: Buffer) {
         // Verified against a live unit: [0]=monStatus [1]=fridgeSetpoint [2]=freezerSetpoint
-        // [3]=expressFreeze (1=off 2=on) [8]=tempUnit (0=F 1=C). Fields beyond those match the
-        // shared layout other 2RE*/2RS* fridges use (see fridge_common.ts), but weren't exercised
-        // in the captures this driver is built from, so only the confirmed ones are read here.
-        if (curStatus.length < 9) {
+        // [3]=expressFreeze (1=off 2=on) [7]=anyDoorOpen [8]=tempUnit (0=F 1=C)
+        // [17]=smartCare (0=off 1=on). Fields beyond those match the shared layout other
+        // 2RE*/2RS* fridges use (see fridge_common.ts), but weren't exercised in the captures
+        // this driver is built from, so only the confirmed ones are read here.
+        if (curStatus.length < 18) {
             console.warn(`Unexpected refrigerator status length: ${curStatus.length}`)
             return
         }
@@ -119,11 +128,11 @@ export default class Device extends AABBDevice {
         const unit = curStatus[8] ? 'C' : 'F'
         this.setTemperatureUnit(unit)
 
-        const anyDoorOpen = curStatus.length > 7 ? curStatus[7] : undefined
-        if (anyDoorOpen !== undefined) this.publishProperty('door', anyDoorOpen === 1 ? 'ON' : 'OFF')
+        this.publishProperty('door', curStatus[7] === 1 ? 'ON' : 'OFF')
         this.publishProperty('fridge_setpoint', convertFridgeTemperature(this.temperatureUnit!, curStatus[1]))
         this.publishProperty('freezer_setpoint', convertFreezerTemperature(this.temperatureUnit!, curStatus[2]))
         this.publishProperty('express_freeze', curStatus[3] === 2 ? 'ON' : 'OFF')
+        this.publishProperty('smart_care', curStatus[17] === 1 ? 'ON' : 'OFF')
     }
 
     setProperty(prop: string, mqttValue: string) {
@@ -145,6 +154,14 @@ export default class Device extends AABBDevice {
             }
             const message = buildF017Message(unit)
             message[2 + 3] = mqttValue === 'ON' ? 2 : 1
+            this.send(message)
+        } else if (prop === 'smart_care') {
+            if (mqttValue !== 'ON' && mqttValue !== 'OFF') {
+                console.warn(`Unexpected smart care value ${mqttValue}`)
+                return
+            }
+            const message = buildF017Message(unit)
+            message[2 + 17] = mqttValue === 'ON' ? 1 : 0
             this.send(message)
         }
     }

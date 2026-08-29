@@ -22,6 +22,14 @@ const SAMPLE_DELTA_FRIDGE_SETPOINT_CHANGE = buf(
     'AAC410EC0206040102FFFF00010001FFFFFFFFFFFF00FFFFFFFFFFFFFFFF020000FF00FFFFFFFFFFFFFFFFFF01FF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0078FFFFFFFFFFFFFFFFFFFFFFFF000000FFFFFFFF0005FFFFFFFF640100FF000205040102FFFF00010001FFFFFFFFFFFF00FFFFFFFFFFFFFFFF020000FF00FFFFFFFFFFFFFFFFFF01FF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0078FFFFFFFFFFFFFFFFFFFFFFFF000000FFFFFFFF0005FFFFFFFF640100FF009ABB',
 )
 
+// Real captures of a smart_care+ (index 17) toggle, sent and received moments apart.
+const SAMPLE_DELTA_SMART_CARE_ON = buf(
+    'AAC410EC0205040102FFFF00010001FFFFFFFFFFFF00FFFFFFFFFFFFFFFF020000FF00FFFFFFFFFFFFFFFFFF01FF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0078FFFFFFFFFFFFFFFFFFFFFFFF000000FFFFFFFF0005FFFFFFFF640100FF000205040107FFFF00010001FFFFFFFFFFFF01FFFFFFFFFFFFFFFF020000FF00FFFFFFFFFFFFFFFFFF01FF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0078FFFFFFFFFFFFFFFFFFFFFFFF000000FFFFFFFF0005FFFFFFFF640100FF0081BB',
+)
+const SAMPLE_DELTA_SMART_CARE_OFF = buf(
+    'AAC410EC0205040107FFFF00010001FFFFFFFFFFFF01FFFFFFFFFFFFFFFF020000FF00FFFFFFFFFFFFFFFFFF01FF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0078FFFFFFFFFFFFFFFFFFFFFFFF000000FFFFFFFF0005FFFFFFFF640100FF000205040102FFFF00010001FFFFFFFFFFFF00FFFFFFFFFFFFFFFF020000FF00FFFFFFFFFFFFFFFFFF01FF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0078FFFFFFFFFFFFFFFFFFFFFFFF000000FFFFFFFF0005FFFFFFFF640100FF0081BB',
+)
+
 function makeDevice() {
     const ha = new MockHAConnection()
     const thinq = new MockThinq2Device(DEVICE_ID, META)
@@ -47,11 +55,13 @@ describe(MODEL_ID, () => {
         assert.equal(components.freezer_setpoint.unit_of_measurement, '°C')
         assert.ok(components.express_freeze, 'express_freeze component')
         assert.ok(components.door, 'door component')
+        assert.ok(components.smart_care, 'smart_care component')
 
         assert.equal(dev.properties.fridge_setpoint, 2) // 8 - 6
         assert.equal(dev.properties.freezer_setpoint, -18) // -14 - 4
         assert.equal(dev.properties.door, 'OFF')
         assert.equal(dev.properties.express_freeze, 'OFF')
+        assert.equal(dev.properties.smart_care, 'OFF')
     })
 
     test('0x10EC delta reflects a fridge setpoint change', () => {
@@ -61,6 +71,18 @@ describe(MODEL_ID, () => {
         assert.equal(props.fridge_setpoint, 3) // 8 - 5
         assert.equal(props.door, 'OFF')
         assert.equal(props.express_freeze, 'OFF')
+    })
+
+    test('0x10EC delta reflects smart_care+ turning on', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', SAMPLE_DELTA_SMART_CARE_ON)
+        assert.equal(ha.devices[DEVICE_ID].properties.smart_care, 'ON')
+    })
+
+    test('0x10EC delta reflects smart_care+ turning off', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', SAMPLE_DELTA_SMART_CARE_OFF)
+        assert.equal(ha.devices[DEVICE_ID].properties.smart_care, 'OFF')
     })
 
     test('frames not matching the AA..BB envelope are ignored', () => {
@@ -117,6 +139,39 @@ describe(MODEL_ID, () => {
         const pkt = thinq.outbox[0]
         // Captured live express-freeze-ON command sets this same byte to 2.
         assert.equal(pkt[4 + 3], 2)
+    })
+
+    test('HA write smart_care=ON matches the smartCare field of a real captured command', () => {
+        const { thinq, dev } = makeDevice()
+        thinq.emit('data', SAMPLE_INITIAL)
+        thinq.resetRecorder()
+
+        dev.setProperty('smart_care', 'ON')
+        // Captured live smart-care+-ON command sets this same byte to 1. Unlike a temperature
+        // write, the real capture for this command leaves the tempUnit byte (message[2+8]) at
+        // FF/no-op rather than the C-marker this driver's buildF017Message always sets - the
+        // same harmless divergence already noted for express_freeze - so this checks field
+        // position rather than the whole frame.
+        assert.equal(thinq.outbox[0][4 + 17], 1)
+    })
+
+    test('HA write smart_care=OFF matches the smartCare field of a real captured command', () => {
+        const { thinq, dev } = makeDevice()
+        thinq.emit('data', SAMPLE_INITIAL)
+        thinq.resetRecorder()
+
+        dev.setProperty('smart_care', 'OFF')
+        // Captured live smart-care+-OFF command sets this same byte to 0.
+        assert.equal(thinq.outbox[0][4 + 17], 0)
+    })
+
+    test('HA write smart_care with an unexpected value sends nothing', () => {
+        const { thinq, dev } = makeDevice()
+        thinq.emit('data', SAMPLE_INITIAL)
+        thinq.resetRecorder()
+
+        dev.setProperty('smart_care', 'MAYBE')
+        assert.equal(thinq.outbox.length, 0)
     })
 
     test('HA write express_freeze with an unexpected value sends nothing', () => {
