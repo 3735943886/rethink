@@ -8,6 +8,7 @@ import Dev_2REF11EBIVPC4 from './devices/2REF11EBIVPC4'
 import Dev_2RES1VE61NFA2 from './devices/2RES1VE61NFA2'
 import Dev_2REB1GLVB1__2 from './devices/2REB1GLVB1__2'
 import Dev_2RES1VE600FWC from './devices/2RES1VE600FWC'
+import Dev_2RSFL2DBN3K_Z from './devices/2RSFL2DBN3K_Z'
 import Dev_STUDIO_HOOD from './devices/STUDIO_HOOD'
 import Y_V8_Y___W_B32QEUK from './devices/Y_V8_Y___W.B32QEUK'
 import F_V8_Y___W_B_2QEUK from './devices/F_V8_Y___W.B_2QEUK'
@@ -62,6 +63,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     ['2RES1VE61NFA2']: Dev_2RES1VE61NFA2,
     ['2REB1GLVB1__2']: Dev_2REB1GLVB1__2,
     ['2RES1VE600FWC']: Dev_2RES1VE600FWC,
+    ['2RSFL2DBN3K_Z']: Dev_2RSFL2DBN3K_Z, // LG Korean refrigerator (deviceType 101), fridge/freezer setpoint + express freeze
     ['STUDIO_HOOD']: Dev_STUDIO_HOOD,
     ['Y_V8_Y___W.B32QEUK']: Y_V8_Y___W_B32QEUK,
     ['F_V7_Y___W.B_2QEUK']: F_V8_Y___W_B_2QEUK, // NOTE: we reuse F_V8_Y___W_B_2QEUK as the models appear to be compatible
