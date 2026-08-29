@@ -88,15 +88,13 @@ class BridgedDevice {
             // Forward the physical device's real deploy appInfo/platformInfo so the upstream
             // preDeploy reports its true protocolVer/softVer/etc. instead of placeholders.
             const conn = new Thinq2Connection(U, D.deployAppInfo, D.deployPlatformInfo)
-            // The cloud's answer to a relayed cmd, handed back to the appliance. startFota is also
-            // where the cloud names the firmware address, and the appliance's request for it comes
-            // back to rethink, so note where it was told to go before passing the message on.
+            // The cloud's answer to a relayed cmd, handed back to the appliance. startFota (and,
+            // for some appliances, an osp_command/osp_report SOTA app install) is also where the
+            // cloud names an address the appliance will fetch content from on its own, and that
+            // request comes back to rethink - so note every URL in the payload before passing it
+            // on, whatever cmd carried it.
             conn.onCloudClip = (payload) => {
-                if (payload.cmd === 'startFota')
-                    this.firmwareHosts?.note(
-                        (payload.data as { updatingFwInfo?: { downloadUrl?: unknown } } | undefined)?.updatingFwInfo
-                            ?.downloadUrl,
-                    )
+                this.firmwareHosts?.noteUrlsIn(payload)
                 D.forward_clip(payload)
             }
             conn.on('close', () => this.disconnect())

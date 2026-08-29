@@ -65,6 +65,48 @@ describe('FirmwareHosts', () => {
         assert.deepEqual(hosts.all(), ['dup.example.invalid'])
     })
 
+    test('noteUrlsIn finds a startFota-shaped url nested under any field name', () => {
+        const hosts = new FirmwareHosts()
+        hosts.noteUrlsIn({
+            cmd: 'startFota',
+            data: { updatingFwInfo: { downloadUrl: REAL_URL } },
+        })
+
+        assert.deepEqual(hosts.all(), ['objectcontent.lgthinq.com'])
+    })
+
+    test('noteUrlsIn finds urls under an unrelated cmd/field path, e.g. an osp SOTA install', () => {
+        const hosts = new FirmwareHosts()
+        hosts.noteUrlsIn({
+            cmd: 'osp_command',
+            data: { cmd: 'reqStartSota', appId: 'lupa.usr.clean_mode', contentUrl: REAL_URL },
+        })
+
+        assert.deepEqual(hosts.all(), ['objectcontent.lgthinq.com'])
+    })
+
+    test('noteUrlsIn collects every url at any depth, including in arrays', () => {
+        const hosts = new FirmwareHosts()
+        hosts.noteUrlsIn({
+            a: [{ b: 'https://one.example.invalid/x' }, 'https://two.example.invalid/y'],
+            c: { d: { e: 'https://three.example.invalid/z' } },
+        })
+
+        assert.deepEqual(
+            hosts.all().sort(),
+            ['one.example.invalid', 'three.example.invalid', 'two.example.invalid'].sort(),
+        )
+    })
+
+    test('noteUrlsIn ignores non-url fields and does not throw on cycles', () => {
+        const hosts = new FirmwareHosts()
+        const cyclic: Record<string, unknown> = { name: 'not a url', n: 42 }
+        cyclic.self = cyclic
+        hosts.noteUrlsIn(cyclic)
+
+        assert.deepEqual(hosts.all(), [])
+    })
+
     test('two registries do not share state', () => {
         const a = new FirmwareHosts()
         const b = new FirmwareHosts()

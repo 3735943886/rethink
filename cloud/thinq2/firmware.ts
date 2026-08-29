@@ -48,6 +48,30 @@ export class FirmwareHosts {
     }
 
     /**
+     * Walk an arbitrary cloud→device payload and note() every http(s) URL found in it, at any
+     * depth and under any field name.
+     *
+     * startFota is not the only cmd that hands an appliance a URL to fetch on its own: SOTA app
+     * content (osp_command/osp_report, e.g. installing a NIGHT_GLARE-style feature) does the same
+     * thing under a field this was never told the name of, and likely differs by cmd or region.
+     * Rather than chase each cmd's exact field path, treat any string that parses as an http(s)
+     * URL anywhere in the payload as one - note() already discards anything that isn't.
+     */
+    noteUrlsIn(payload: unknown, seen = new Set<unknown>()) {
+        if (typeof payload === 'string') {
+            this.note(payload)
+        } else if (Array.isArray(payload)) {
+            if (seen.has(payload)) return
+            seen.add(payload)
+            for (const item of payload) this.noteUrlsIn(item, seen)
+        } else if (payload && typeof payload === 'object') {
+            if (seen.has(payload)) return
+            seen.add(payload)
+            for (const value of Object.values(payload)) this.noteUrlsIn(value, seen)
+        }
+    }
+
+    /**
      * Whether a TLS server name belongs to a firmware download, and so should be handed to the real
      * server rather than answered here.
      */
