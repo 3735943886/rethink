@@ -276,9 +276,9 @@ export default abstract class ACDevice extends TLVDevice {
     /* Symmetric with the two above, for anything derived from the fan speed. */
     fanChangeHooks: PowerModeChangeHook[] = []
     fanPrev?: string | number
-    airClean: boolean = false
-    jetMode: boolean = false
-    energySave: boolean = false
+    airClean: boolean | undefined
+    jetMode: boolean | undefined
+    energySave: boolean | undefined
     tlvBlacklistDisableTimer: ReturnType<typeof setTimeout> | undefined
     increasedQueryIntervalTimeout: ReturnType<typeof setTimeout> | undefined
     filterUsedTime: number = 0
@@ -1681,6 +1681,7 @@ export default abstract class ACDevice extends TLVDevice {
          * field's read callback - so registering the same write on both lists only sent it twice.
          */
         this.modeChangeHooks.push(() => {
+            if (this.jetMode === undefined) return
             this.setProperty(name + '-', this.jetMode ? 'ON' : 'OFF')
         })
     }
@@ -1839,7 +1840,7 @@ export default abstract class ACDevice extends TLVDevice {
         name: string,
         desc: string,
         icon: string,
-        field_name: 'airClean' | 'jetMode' | 'energySave',
+        field_name: 'airClean' | 'energySave',
         check_mode?: CheckMode,
     ) {
         this.addSwitchComponent(config, name, desc, icon, this.modeDependentSwitchOptimistic)
@@ -1878,10 +1879,12 @@ export default abstract class ACDevice extends TLVDevice {
          */
         if (check_mode) {
             this.modeChangeHooks.push(() => {
+                if (this[field_name] === undefined) return
                 this.setProperty(name + '-', this[field_name] ? 'ON' : 'OFF')
             })
         } else {
             this.powerChangeHooks.push(() => {
+                if (this[field_name] === undefined) return
                 if (this.getPowerTLV() === 0) return
                 this.setProperty(name + '-', this[field_name] ? 'ON' : 'OFF')
             })

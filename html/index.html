@@ -36,7 +36,7 @@
              * The device list is the widest thing on this page, and the widest thing in it is a
              * 36-character UUID, so on a phone the whole page ends up scrolling sideways. Below the
              * width where six columns stop fitting, each row becomes a card instead: the name, model
-             * and id stack in one column, with the bridge switch and the monitor button pinned to the
+             * and id stack in one column, with the bridge switch and the action buttons pinned to the
              * right where a thumb can still reach them. Nothing is hidden - the id and the platform
              * just move under the name and get out of the way.
              */
@@ -49,10 +49,10 @@
                     display: grid;
                     grid-template-columns: minmax(0, 1fr) auto auto;
                     grid-template-areas:
-                        'name     bridge monitor'
-                        'model    bridge monitor'
-                        'platform bridge monitor'
-                        'id       bridge monitor';
+                        'name     bridge actions'
+                        'model    bridge actions'
+                        'platform bridge actions'
+                        'id       bridge actions';
                     gap: 0 0.5rem;
                     align-items: center;
                     padding: 0.5rem 0;
@@ -81,8 +81,8 @@
                     grid-area: bridge;
                     width: auto;
                 }
-                #devices_table .dev-monitor {
-                    grid-area: monitor;
+                #devices_table .dev-actions {
+                    grid-area: actions;
                 }
 
                 #devices_table .dev-platform,
@@ -101,9 +101,9 @@
                     text-overflow: ellipsis;
                 }
 
-                /* The default button padding is wider than the icon needs, and here it is competing
-                   with the device's own name for the width of a phone. */
-                #devices_table .dev-monitor .btn {
+                /* The default button padding is wider than the icons need, and here two of them are
+                   competing with the device's own name for the width of a phone. */
+                #devices_table .dev-actions .btn {
                     padding: 0 0.75rem;
                 }
             }
@@ -144,7 +144,7 @@
                         <th>Model</th>
                         <th>Platform</th>
                         <th>Bridge</th>
-                        <th>Monitor</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
 

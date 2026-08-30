@@ -154,9 +154,21 @@ class DeviceEntry {
         }
 
         td = document.createElement('td')
-        td.className = 'dev-monitor'
-        td.innerHTML = `<a class="btn waves-effect waves-light" href="monitor?id=${this.id}"><i class="material-icons">troubleshoot</i></a>`
+        // Materialize disables a button with pointer-events: none, which would swallow the hover
+        // that opens its tooltip - so the tooltip lives on a wrapper instead of on the button.
+        td.className = 'dev-actions'
+        td.innerHTML = `
+            <span class="tooltipped" style="display: inline-block" data-position="bottom" data-tooltip="Monitor">
+                <a class="btn waves-effect waves-light" href="monitor?id=${this.id}"><i class="material-icons">troubleshoot</i></a>
+            </span>
+            <span class="tooltipped" style="display: inline-block" data-position="bottom"
+                data-tooltip="Download the modelJSON file. Requires bridge mode.">
+                <a class="btn waves-effect waves-light"><i class="material-icons">description</i></a>
+            </span>`
         children.push(td)
+
+        this.modelJsonButton = td.getElementsByTagName('a')[1]
+        this.modelJsonButton.onclick = () => this.downloadModelJson()
 
         this.row.replaceChildren(...children)
         Array.from(this.row.getElementsByClassName('tooltipped')).forEach((e) => M.Tooltip.init(e))
@@ -182,6 +194,36 @@ class DeviceEntry {
         // Materialize greys out a switch from the disabled attribute, not from a class, so setting
         // a class left the switch live while logged out - clicking it just produced an HTTP 400.
         this.bridgeSwitch.disabled = !bridge_status
+
+        // the modelJSON only comes from the ThinQ cloud, and only for a device registered there
+        this.modelJsonButton.classList.toggle('disabled', !(bridge_status && this.remoteState.bridged))
+    }
+
+    // The modelJSON is fetched by rethink and handed over as a blob, so that a failure shows up as a
+    // toast instead of navigating the panel away to an error page.
+    async downloadModelJson() {
+        if (this.modelJsonButton.classList.contains('disabled') || this.modelJsonBusy) return
+
+        this.modelJsonBusy = true
+        try {
+            const response = await fetch(`${baseUrl}bridge/${this.id}/modeljson`)
+            if (response.status >= 300) {
+                M.toast({ html: `HTTP error ${response.status}: ${await response.text()}` })
+                return
+            }
+
+            const match = /filename="([^"]*)"/.exec(response.headers.get('content-disposition') ?? '')
+            const url = URL.createObjectURL(await response.blob())
+            const link = document.createElement('a')
+            link.href = url
+            link.download = match ? match[1] : `${this.id}.json`
+            link.click()
+            URL.revokeObjectURL(url)
+        } catch (err) {
+            M.toast({ html: `FETCH error: ${err}` })
+        } finally {
+            this.modelJsonBusy = false
+        }
     }
 }
 

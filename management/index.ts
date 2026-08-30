@@ -11,6 +11,13 @@ import { Request, Response } from 'express'
 import { Device as T1Device } from '@/cloud/thinq1/device'
 import { Device as T2Device } from '@/cloud/thinq2/device'
 
+// refresh bridged device names policy:
+// - only if a websocket subscriber is connected
+// - on the first subscriber's connection (but no more often than 1/minute)
+// - every 15 minutes
+const BRIDGE_REFRESH_NAMES_PERIOD = 1000 * 60 * 15
+const BRIDGE_REFRESH_NAMES_COOLOFF = 1000 * 60
+
 export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | undefined) {
     const app = new WebSocketExpress()
     const subscribers = new Set<ExtendedWebSocket>()
@@ -64,6 +71,9 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 closeQuietly(ws)
                 return
             }
+
+            if (subscribers.size === 0) firstSubscriberConnected()
+
             subscribers.add(ws)
 
             safeSend(
@@ -79,6 +89,7 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
 
             ws.on('close', () => {
                 subscribers.delete(ws)
+                if (subscribers.size === 0) lastSubscriberDisconnected()
             })
         }, next)
     })
@@ -166,6 +177,22 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
             }),
         )
 
+        app.get(
+            '/bridge/:deviceId/modeljson',
+            asyncHandler(async (req, res) => {
+                try {
+                    const { modelName, modelJson } = await bridge.getModelJson(req.params.deviceId)
+                    // the model name comes from the device, don't let it break out of the header
+                    const fileName = modelName.replace(/[^A-Za-z0-9._-]/g, '_') || 'model'
+                    res.setHeader('Content-Type', 'application/json')
+                    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.json"`)
+                    res.end(modelJson)
+                } catch (err) {
+                    res.status(500).end(`${err}`)
+                }
+            }),
+        )
+
         app.post(
             '/bridge/:deviceId/disable',
             asyncHandler(async (req, res) => {
@@ -194,6 +221,30 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
 
     function bridgeStatus() {
         if (bridge) return { loggedIn: bridge.isLoggedIn() }
+    }
+
+    let refreshNamesTimer: ReturnType<typeof setInterval> | undefined
+    let lastNamesRefresh: number | undefined
+
+    // device name list refresh
+    function firstSubscriberConnected() {
+        function maybeRefreshNames() {
+            const now = Date.now()
+            if (lastNamesRefresh && now - lastNamesRefresh < BRIDGE_REFRESH_NAMES_COOLOFF) return
+
+            void bridge?.refreshNames()
+            lastNamesRefresh = Date.now()
+        }
+
+        if (bridge) {
+            maybeRefreshNames()
+            refreshNamesTimer = setInterval(() => maybeRefreshNames(), BRIDGE_REFRESH_NAMES_PERIOD)
+        }
+    }
+
+    function lastSubscriberDisconnected() {
+        if (refreshNamesTimer) clearInterval(refreshNamesTimer)
+        refreshNamesTimer = undefined
     }
 
     // device monitoring
@@ -353,6 +404,7 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
             closeQuietly(monitor)
         }
         deviceMonitors.clear()
+        lastSubscriberDisconnected()
     }
 
     const close = server.close.bind(server)

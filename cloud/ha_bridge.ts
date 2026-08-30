@@ -35,6 +35,7 @@ import S3BF_POD_DN4 from './devices/S3BF_POD_DN4'
 import Pd0F_F from './devices/Pd0F_F'
 import RV13B6ES_D_US_WIFI from './devices/RV13B6ES_D_US_WIFI'
 import WTL_FXU_BDV_NA_01 from './devices/WTL_FXU_BDV_NA_01'
+import ST_B_E4H01Y_APL from './devices/ST_B_E4H01Y_APL'
 import { Device as T1Device } from './thinq1/device'
 import { Device as T2Device } from './thinq2/device'
 import { type Connection } from './homeassistant'
@@ -94,6 +95,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     ['RV13B6ES_D_US_WIFI']: RV13B6ES_D_US_WIFI, // LG electric dryer, same frame layout as RV13B6BSD but
     // Wrinkle Care sits in a different bitfield, so it needs its own handler rather than an alias
     WTL_FXU_BDV_NA_01, // LG WashTower (WKEX200HBA), washer and dryer on one device
+    ST_B_E4H01Y_APL, // LG Styler (S5BBP), deviceType 203
 }
 
 class Bridge {

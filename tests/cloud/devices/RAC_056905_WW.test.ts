@@ -248,11 +248,35 @@ describe(MODEL_ID, () => {
     test('powering on re-asserts jet exactly once', (t) => {
         const { thinq, dev } = buildReadyDevice(t)
 
+        // A known jetMode is what the mode-change hook re-asserts; the value itself is
+        // unimportant to this test, only that a read has established one at all - an appliance
+        // that reconnects mid-cycle without ever being asked must not have this written blind.
+        dev.jetMode = false
+
         thinq.emit('data', powerFrame(0))
         thinq.resetRecorder()
         thinq.emit('data', powerFrame(1))
 
         assert.equal(framesCarryingTag(thinq, 0x323).length, 1, 'one jet write, not one per hook list')
+
+        dev.drop()
+    })
+
+    /*
+     * A unit that reconnects mid-cycle, before a read has ever told rethink what jetMode/airClean/
+     * energySave actually are, must not write anything for them on that power-up - a blind write
+     * always sends OFF (the field's undefined-turned-falsy default), which silently disables
+     * whichever of these the unit had running.
+     */
+    test('powering on does not write jet, airClean or energySave before any read established them', (t) => {
+        const { thinq, dev } = buildReadyDevice(t)
+        assert.equal(dev.jetMode, undefined, 'never read yet')
+
+        thinq.emit('data', powerFrame(0))
+        thinq.resetRecorder()
+        thinq.emit('data', powerFrame(1))
+
+        assert.equal(framesCarryingTag(thinq, 0x323).length, 0, 'jetMode still unknown, nothing to re-assert')
 
         dev.drop()
     })
