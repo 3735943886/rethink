@@ -28,6 +28,8 @@
     "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && cp -r html dist/",
     "dev": "tsx rethink-cloud.ts",
     "start": "node dist/rethink-cloud.js",
+    "adapter:dev": "tsx rusthinq-adapter.ts",
+    "adapter:start": "node dist/rusthinq-adapter.js",
     "format": "npx prettier . --write",
     "postinstall": "node scripts/install-git-hooks.mjs",
     "test": "node --import tsx --test --test-reporter=spec $(find tests -name '*.test.ts')"

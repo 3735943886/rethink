@@ -1,0 +1,27 @@
+{
+  // Same shape as config.jsonc's "homeassistant" block - this process still talks to Home
+  // Assistant exactly as rethink-cloud.ts always has.
+  "homeassistant": {
+    "mqtt_url": "mqtt://localhost:1883",
+    "discovery_prefix": "homeassistant",
+    "rethink_prefix": "rethink", // distinct from rusthinq's own rusthinq_prefix - no topic collision
+    "mqtt_user": "",
+    "mqtt_pass": ""
+    // "storage_path": "./ha-state"
+  },
+
+  // Must match the *rusthinq* daemon's config.toml [mqtt] section - same broker, same prefixes.
+  "rusthinq": {
+    "mqtt_url": "mqtt://localhost:1883",
+    "mqtt_user": "",
+    "mqtt_pass": "",
+    "rusthinq_prefix": "rusthinq", // rusthinq's [mqtt] rusthinq_prefix
+    "raw_prefix": "rusthinq-raw" // rusthinq's [mqtt] raw_prefix - must be set there for this to work
+  },
+
+  "bridge": {
+    "storage_path": "./state"
+  },
+
+  "log": ["status"]
+}
