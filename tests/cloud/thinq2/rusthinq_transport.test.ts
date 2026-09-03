@@ -112,4 +112,23 @@ describe('RusthinqTransportSource', () => {
         assert.deepEqual(sawSendData, Buffer.from([0x01, 0x02]))
         assert.deepEqual(published, [{ topic: 'rusthinq-raw/dev1/raw/inject/set', payload: '0102' }])
     })
+
+    test('send publishes a JSON CLIP envelope to raw/inject-clip', () => {
+        const { client, published } = fakeClient()
+        const source = new RusthinqTransportSource(CONFIG, () => client as never)
+        source.on('newDevice', (dev) => dev.send('setMaskingInfo', 0, { blacklist_tlv: '1200' }))
+
+        client.emit(
+            'message',
+            'rusthinq/devices',
+            Buffer.from(snapshot({ dev1: { model: 'CST_570004_WW', platform: 'thinq2' } })),
+        )
+
+        assert.deepEqual(published, [
+            {
+                topic: 'rusthinq-raw/dev1/raw/inject-clip/set',
+                payload: JSON.stringify({ cmd: 'setMaskingInfo', type: 0, data: { blacklist_tlv: '1200' } }),
+            },
+        ])
+    })
 })
